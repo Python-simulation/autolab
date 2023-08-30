@@ -74,7 +74,7 @@ def read_xml(file):
             power_scan = float(lasers.attrib["Power"])
             low_wavelength_scan = float(scan.attrib["Start"])
             high_wavelength_scan = float(scan.attrib["Stop"])
-            res_scan = float(scan.attrib["Resolution"])
+            res_scan = int(float(scan.attrib["Resolution"]))
 
             sources = [lasers] if len(lasers) == 0 else lasers
             for source in sources:
@@ -83,14 +83,14 @@ def read_xml(file):
                 address.append(int(src_att["GPIBAddress"]))
                 low_wavelength.append(float(src_att["MinWL"]))
                 high_wavelength.append(float(src_att["MaxWL"]))
-                speed.append(float(src_att["Speed"]))
+                speed.append(int(float(src_att["Speed"])))
 
                 # TODO: check, assume variable "Number" from lasers is how many laser are active and assume id doesn't change
                 if len(sources) == 1:
                     connected.append(True)
                 else:
                     connected.append(True if src_att["Id"] < lasers.attrib["Number"] else False)
-                laser_model.append(src_att["Type"])
+                laser_model.append(int(src_att["Type"]))
 
             detector_array = [True, False, False, False]  # TODO: don't known which variable correspond to this. Maybe
             # hypothesis is that Detector="0" in trace mean is active so could activate detector if exist in trace
@@ -436,7 +436,6 @@ class Laser:
         self._low_wavelength = self.config["low_wavelength"][self.NUM-1]
         self._high_wavelength = self.config["high_wavelength"][self.NUM-1]
         self._speed = self.config["speed"][self.NUM-1]
-
         self._state = False
         self._power = 1.
         self._wavelength = 1550.
@@ -451,11 +450,11 @@ class Laser:
                                            self._speed)
         elif self.model == "CT440":
             self.controller.set_laser2(self.uiHandle, self.NUM, self._connected,
-                                       str.encode(f"GPIB{self._GPIBGPIBID}::{self._GPIBAdress}"),  # self._GPIBID, self._GPIBAdress,
+                                       str.encode(f"GPIB{self._GPIBID}::{self._GPIBAdress}"),  # self._GPIBID, self._GPIBAdress,
                                        self._laser_model,
                                        ct.c_double(self._low_wavelength),
                                        ct.c_double(self._high_wavelength),
-                                       self._speed)
+                                       int(self._speed))
 
     def get_model(self):
         return self._laser_model
@@ -499,7 +498,7 @@ class Laser:
         return self._speed
 
     def set_speed(self, value):
-        self._speed = int(value) # TODO: check if int ok or need float for ct440
+        self._speed = int(value)
         self._init_laser()
 
 
@@ -654,7 +653,6 @@ class Scan:
         self._high_wavelength_scan = float(value)
         self.set_scan(self._power_scan, self._low_wavelength_scan, self._high_wavelength_scan)
 
-    # TODO: need to check if ct440 has bad behavior when changing min, max, step one by one -> fear that res will change everytime to match any changes
     def set_scan(self, power, low_wl, high_wl, res="default"):
         if self.model == "CT400":
             self.controller.CT400_SetScan(
@@ -665,15 +663,17 @@ class Scan:
         elif self.model == "CT440":
             if res == "default":
                 res = self._res
-            res_pointer = ct.c_uint32(res)
-
+                
+            PI = ct.POINTER(ct.c_int)
+            res_pointer = PI(ct.c_int(res))
             self.controller.set_scan(
                     self.uiHandle,
                     ct.c_double(power),
                     ct.c_double(low_wl),
                     ct.c_double(high_wl),
-                    res_pointer)  # TODO: to test. if doesn't work use ct.byref(ct.c_int(res))
-            self._res = int(res_pointer.value)  # SetScan can change this value
+                    res_pointer)
+
+            self._res = int(res_pointer.contents.value)  # SetScan can change this value
 
     def get_res(self):
         return self._res
@@ -990,11 +990,17 @@ class Detectors:
 
         if self.model == "CT440":
         	iError = ct.c_int32()
-        	uiHandle = self.controller.init(iError)  # TODO: to test without byref because ct440_lib declare pointer -> should not be necessary to use byref here
+        	uiHandle = self.controller.init(iError)
         else:
-            uiHandle = ct.c_longlong(getattr(self.controller, self.model+"_Init")())
-
-        assert uiHandle > 0, CONNECTION_ERROR
+            try:       
+                uiHandle = ct.c_longlong(getattr(self.controller, self.model+"_Init")())
+                self._NBR_INPUT = getattr(self.controller, self.model+"_GetNbInputs")(self.uiHandle)
+            except Exception:
+                self.controller.CT400_Init.argtypes = [ct.POINTER(ct.c_int32)]
+                self.controller.CT400_Init.restype = ct.c_uint64
+                iError = ct.c_int32()
+                uiHandle = ct.c_longlong(getattr(self.controller, self.model+"_Init")(iError))
+        assert uiHandle != 0, CONNECTION_ERROR
 
         self.uiHandle = uiHandle
 
@@ -1002,7 +1008,6 @@ class Detectors:
             self._NBR_INPUT = self.controller.get_nb_inputs(self.uiHandle)
         else:
             self._NBR_INPUT = getattr(self.controller, self.model+"_GetNbInputs")(self.uiHandle)
-
         if self.model == "CT440":
             self._NBR_DETECTOR = self.controller.get_nb_detectors(self.uiHandle)
         else:
@@ -1097,10 +1102,11 @@ class Detectors:
 
 
     def close(self):
-        if self.model == "CT440":
-            self.controller.close(self.uiHandle)
-        else:
-            getattr(self.controller, self.model+"_Close")(self.uiHandle)
+        if hasattr(self, "controller"):
+            if self.model == "CT440":
+                self.controller.close(self.uiHandle)
+            else:
+                getattr(self.controller, self.model+"_Close")(self.uiHandle)
 
 
 
