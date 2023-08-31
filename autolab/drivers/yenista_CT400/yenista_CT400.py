@@ -50,7 +50,7 @@ def laser_code(name, permute=False):
         else:
             code = code_dict["TunicsPlus"]
 
-    return code # {name:code}
+    return code
 
 
 def read_xml(file):
@@ -85,14 +85,13 @@ def read_xml(file):
                 high_wavelength.append(float(src_att["MaxWL"]))
                 speed.append(int(float(src_att["Speed"])))
 
-                # TODO: check, assume variable "Number" from lasers is how many laser are active and assume id doesn't change
                 if len(sources) == 1:
                     connected.append(True)
                 else:
                     connected.append(True if src_att["Id"] < lasers.attrib["Number"] else False)
                 laser_model.append(int(src_att["Type"]))
 
-            detector_array = [True, False, False, False]  # TODO: don't known which variable correspond to this. Maybe
+            detector_array = [False, False, False]  # TODO: don't known which variable correspond to this. Maybe
             # hypothesis is that Detector="0" in trace mean is active so could activate detector if exist in trace
         else:
             common = tree.find('Configuration/Sources/Common').attrib
@@ -441,21 +440,21 @@ class Laser:
         self._wavelength = 1550.
 
     def _init_laser(self):
-        if self.model == "CT400":
-            self.controller.CT400_SetLaser(self.uiHandle, self.NUM, self._connected,
+        if self.model == "CT440":
+            self.controller.set_laser(self.uiHandle, self.NUM, self._connected,
+                                      self._GPIBID, self._GPIBAdress,  # for set_laser2 use this: str.encode(f"GPIB{self._GPIBGPIBID}::{self._GPIBAdress}"),  #
+                                      self._laser_model,
+                                      ct.c_double(self._low_wavelength),
+                                      ct.c_double(self._high_wavelength),
+                                      self._speed)
+
+        else:
+            self.controller.set_laser(self.uiHandle, self.NUM, self._connected,
                                            self._GPIBAdress,
                                            self._laser_model,
                                            ct.c_double(self._low_wavelength),
                                            ct.c_double(self._high_wavelength),
                                            self._speed)
-        elif self.model == "CT440":
-            self.controller.set_laser2(self.uiHandle, self.NUM, self._connected,
-                                       str.encode(f"GPIB{self._GPIBID}::{self._GPIBAdress}"),  # self._GPIBID, self._GPIBAdress,
-                                       self._laser_model,
-                                       ct.c_double(self._low_wavelength),
-                                       ct.c_double(self._high_wavelength),
-                                       int(self._speed))
-
     def get_model(self):
         return self._laser_model
 
@@ -535,12 +534,7 @@ class Laser:
 
 
     def _CmdLaser(self):
-        if self.model == "CT440":
-            self.controller.cmd_laser(self.uiHandle, self.NUM, self._state, ct.c_double(self._wavelength), ct.c_double(self._power))
-        else:
-            getattr(self.controller, self.model+"_CmdLaser")(
-            self.uiHandle, self.NUM, self._state,
-            ct.c_double(self._wavelength), ct.c_double(self._power))
+        self.controller.cmd_laser(self.uiHandle, self.NUM, self._state, ct.c_double(self._wavelength), ct.c_double(self._power))
 
 
     def get_driver_model(self):
@@ -570,9 +564,6 @@ class Laser:
                        'read':self.get_speed,'write':self.set_speed,
                        'help':'Set the laser wavelength scan speed in nm/s'})
 
-        # config.append({'element':'action','name':'connect_laser','do':self.connect,
-        #                "help": "Try to connect to the laser"})
-
         if self.model == "CT440":
             config.append({'element':'variable','name':'GPIBID','type':int,
                            'read':self.get_GPIBID,'write':self.set_GPIBID,
@@ -595,7 +586,7 @@ class Laser:
 class Scan:
     """ Contain all the ct400/ct440 commands related to the laser"""
 
-    def __init__(self, dev):  # dev is the detector instance
+    def __init__(self, dev):  # dev is the detector instance, dev.dev is Driver
         self.dev = dev
         self.model = self.dev.dev.model
         self.config = self.dev.dev.config
@@ -654,16 +645,9 @@ class Scan:
         self.set_scan(self._power_scan, self._low_wavelength_scan, self._high_wavelength_scan)
 
     def set_scan(self, power, low_wl, high_wl, res="default"):
-        if self.model == "CT400":
-            self.controller.CT400_SetScan(
-                    self.uiHandle,
-                    ct.c_double(power),
-                    ct.c_double(low_wl),
-                    ct.c_double(high_wl))
-        elif self.model == "CT440":
+        if self.model == "CT440":
             if res == "default":
                 res = self._res
-                
             PI = ct.POINTER(ct.c_int)
             res_pointer = PI(ct.c_int(res))
             self.controller.set_scan(
@@ -672,19 +656,24 @@ class Scan:
                     ct.c_double(low_wl),
                     ct.c_double(high_wl),
                     res_pointer)
-
-            self._res = int(res_pointer.contents.value)  # SetScan can change this value
+            self._res = int(res_pointer.contents.value)  # CT440 can change the resolution
+        else:
+            self.controller.set_scan(
+                    self.uiHandle,
+                    ct.c_double(power),
+                    ct.c_double(low_wl),
+                    ct.c_double(high_wl))
 
     def get_res(self):
         return self._res
 
     def set_res(self, value):
-        if self.model == "CT400":
-            self._res = int(value)
-            self.controller.CT400_SetSamplingResolution(self.uiHandle, self._res)
-        elif self.model == "CT440":
+        if self.model == "CT440":
             self._res = int(value)
             self.set_scan(self._power_scan, self._low_wavelength_scan, self._high_wavelength_scan)
+        else:
+            self._res = int(value)
+            self.controller.set_resolution(self.uiHandle, self._res)
 
     def get_interpolate(self):
         return self._interpolate
@@ -726,40 +715,24 @@ class Scan:
             if laser is not None and laser._connected:
                 laser._state = ENABLE
 
-        if self.model == "CT440":
-            self.controller.set_detector_array(self.uiHandle,
-                                                   self._detector2_state,
-                                                   self._detector3_state,
-                                                   self._detector4_state,
-                                                   DISABLE)  # eExt
-        else:
-            getattr(self.controller, self.model+"_SetDetectorArray")(self.uiHandle,
+        self.controller.set_detector_array(self.uiHandle,
                                                    self._detector2_state,
                                                    self._detector3_state,
                                                    self._detector4_state,
                                                    DISABLE)  # eExt
 
-        if self.model == "CT440":
-            self.controller.set_bnc(self.uiHandle, DISABLE, ct.c_double(0.0), ct.c_double(0.0), Unit_mW)
-        else:
-            getattr(self.controller, self.model+"_SetBNC")(self.uiHandle, DISABLE, ct.c_double(0.0), ct.c_double(0.0), Unit_mW)
+        self.controller.set_bnc(self.uiHandle, DISABLE, ct.c_double(0.0), ct.c_double(0.0), Unit_mW)
 
         self.set_scan(self._power_scan, self._low_wavelength_scan, self._high_wavelength_scan)
-
 
         if self.model == "CT440":
             self.controller.scan_start(self.uiHandle, DISABLE)  # ENABLE seems to be used for calibration only
         else:
-            getattr(self.controller, self.model+"_ScanStart")(self.uiHandle)
+            self.controller.scan_start(self.uiHandle)
 
-        if self.model == "CT440":
-            iErrorID = self.controller.scan_wait_end(self.uiHandle, self.tcError)
-        else:
-            iErrorID = getattr(self.controller, self.model+"_ScanWaitEnd")(self.uiHandle, self.tcError)
+        iErrorID = self.controller.scan_wait_end(self.uiHandle, self.tcError)
 
         assert iErrorID == 0, 'Error during sweep: '+repr(self.tcError.value)[2:-1]
-
-
 
         self._get_data_sweep()
 
@@ -767,27 +740,13 @@ class Scan:
     def _get_data_sweep(self):
         if self._interpolate:
 
-            if self.model == "CT440":
-                iPointsNumberResampled = self.controller.get_nb_datapoints_resampled(self.uiHandle)
-            else:
-                iPointsNumberResampled = getattr(self.controller, self.model+"_GetNbDataPointsResampled")(self.uiHandle)
+            iPointsNumberResampled = self.controller.get_nb_datapoints_resampled(self.uiHandle)
             DataArraySizeResampled = ct.c_double * iPointsNumberResampled
             (dWavelengthResampled, dPowerResampled, dDetector1Resampled) = (DataArraySizeResampled(), DataArraySizeResampled(), DataArraySizeResampled())
 
-            if self.model == "CT440":
-                self.controller.scan_get_wavelength_resampled_array(self.uiHandle, dWavelengthResampled, iPointsNumberResampled)
-            else:
-                getattr(self.controller, self.model+"_ScanGetWavelengthResampledArray")(self.uiHandle, ct.byref(dWavelengthResampled), iPointsNumberResampled)
-
-            if self.model == "CT440":
-                self.controller.scan_get_power_resampled_array(self.uiHandle, dPowerResampled, iPointsNumberResampled)
-            else:
-                getattr(self.controller, self.model+"_ScanGetPowerResampledArray")(self.uiHandle, ct.byref(dPowerResampled), iPointsNumberResampled)
-
-            if self.model == "CT440":
-                self.controller.scan_get_detector_resampled_array(self.uiHandle, DE_1, dDetector1Resampled, iPointsNumberResampled)
-            else:
-                getattr(self.controller, self.model+"_ScanGetDetectorResampledArray")(self.uiHandle, DE_1, ct.byref(dDetector1Resampled), iPointsNumberResampled)
+            self.controller.scan_get_wavelength_resampled_array(self.uiHandle, dWavelengthResampled, iPointsNumberResampled)
+            self.controller.scan_get_power_resampled_array(self.uiHandle, dPowerResampled, iPointsNumberResampled)
+            self.controller.scan_get_detector_resampled_array(self.uiHandle, DE_1, dDetector1Resampled, iPointsNumberResampled)
 
             results_interp = {"L": np.array(dWavelengthResampled, dtype=float),
                               "O": np.array(dPowerResampled, dtype=float),
@@ -795,29 +754,17 @@ class Scan:
 
             if self._detector2_state:
                 dDetector2Resampled = DataArraySizeResampled()
-
-                if self.model == "CT440":
-                    self.controller.scan_get_detector_resampled_array(self.uiHandle, DE_2, dDetector2Resampled, iPointsNumberResampled)
-                else:
-                    getattr(self.controller, self.model+"_ScanGetDetectorResampledArray")(self.uiHandle, DE_2, ct.byref(dDetector2Resampled), iPointsNumberResampled)
+                self.controller.scan_get_detector_resampled_array(self.uiHandle, DE_2, dDetector2Resampled, iPointsNumberResampled)
                 results_interp["2"] = np.array(dDetector2Resampled, dtype=float)
 
             if self._detector3_state:
                 dDetector3Resampled = DataArraySizeResampled()
-
-                if self.model == "CT440":
-                    self.controller.scan_get_detector_resampled_array(self.uiHandle, DE_3, dDetector3Resampled, iPointsNumberResampled)
-                else:
-                    getattr(self.controller, self.model+"_ScanGetDetectorResampledArray")(self.uiHandle, DE_3, ct.byref(dDetector3Resampled), iPointsNumberResampled)
+                self.controller.scan_get_detector_resampled_array(self.uiHandle, DE_3, dDetector3Resampled, iPointsNumberResampled)
                 results_interp["3"] = np.array(dDetector3Resampled, dtype=float)
 
             if self._detector4_state:
                 dDetector4Resampled = DataArraySizeResampled()
-
-                if self.model == "CT440":
-                    self.controller.scan_get_detector_resampled_array(self.uiHandle, DE_4, dDetector4Resampled, iPointsNumberResampled)
-                else:
-                    getattr(self.controller, self.model+"_ScanGetDetectorResampledArray")(self.uiHandle, DE_4, ct.byref(dDetector4Resampled), iPointsNumberResampled)
+                self.controller.scan_get_detector_resampled_array(self.uiHandle, DE_4, dDetector4Resampled, iPointsNumberResampled)
                 results_interp["4"] = np.array(dDetector4Resampled, dtype=float)
 
             results = results_interp
@@ -829,24 +776,13 @@ class Scan:
                 self.controller.get_nb_datapoints(self.uiHandle, iDataPoints, iDiscardPoints)
                 iPointsNumber = iDataPoints[0]
             else:
-                iPointsNumber = getattr(self.controller, self.model+"_GetNbDataPoints")(self.uiHandle)
+                iPointsNumber = self.controller.get_nb_datapoints(self.uiHandle)
             DataArraySize = ct.c_double * iPointsNumber
             (dWavelengthSync, dPowerSync, dDetector1Sync) = (DataArraySize(), DataArraySize(), DataArraySize())
 
-            if self.model == "CT440":
-                self.controller.scan_get_wavelength_sync_array(self.uiHandle, dWavelengthSync, iPointsNumber)
-            else:
-                getattr(self.controller, self.model+"_ScanGetWavelengthSyncArray")(self.uiHandle, ct.byref(dWavelengthSync), iPointsNumber)
-
-            if self.model == "CT440":
-                self.controller.scan_get_power_sync_array(self.uiHandle, dPowerSync, iPointsNumber)
-            else:
-                getattr(self.controller, self.model+"_ScanGetPowerSyncArray")(self.uiHandle, ct.byref(dPowerSync), iPointsNumber)
-
-            if self.model == "CT440":
-                self.controller.scan_get_detector_array(self.uiHandle, DE_1, dDetector1Sync, iPointsNumber)
-            else:
-                getattr(self.controller, self.model+"_ScanGetDetectorArray")(self.uiHandle, DE_1, ct.byref(dDetector1Sync), iPointsNumber)
+            self.controller.scan_get_wavelength_sync_array(self.uiHandle, dWavelengthSync, iPointsNumber)
+            self.controller.scan_get_power_sync_array(self.uiHandle, dPowerSync, iPointsNumber)
+            self.controller.scan_get_detector_array(self.uiHandle, DE_1, dDetector1Sync, iPointsNumber)
 
             results_raw = {"L": np.array(dWavelengthSync, dtype=float),
                            "O": np.array(dPowerSync, dtype=float),
@@ -855,29 +791,18 @@ class Scan:
 
             if self._detector2_state:
                 dDetector2Sync = DataArraySize()
-
-                if self.model == "CT440":
-                    self.controller.scan_get_detector_array(self.uiHandle, DE_2, dDetector2Sync, iPointsNumber)
-                else:
-                    getattr(self.controller, self.model+"_ScanGetDetectorArray")(self.uiHandle, DE_2, ct.byref(dDetector2Sync), iPointsNumber)
+                self.controller.scan_get_detector_array(self.uiHandle, DE_2, dDetector2Sync, iPointsNumber)
                 results_raw["2"] = np.array(dDetector2Sync, dtype=float)
 
             if self._detector3_state:
                 dDetector3Sync = DataArraySize()
-
-                if self.model == "CT440":
-                    self.controller.scan_get_detector_array(self.uiHandle, DE_3, dDetector3Sync, iPointsNumber)
-                else:
-                    getattr(self.controller, self.model+"_ScanGetDetectorArray")(self.uiHandle, DE_3, ct.byref(dDetector3Sync), iPointsNumber)
+                self.controller.scan_get_detector_array(self.uiHandle, DE_3, dDetector3Sync, iPointsNumber)
                 results_raw["3"] = np.array(dDetector3Sync, dtype=float)
 
             if self._detector4_state:
                 dDetector4Sync = DataArraySize()
 
-                if self.model == "CT440":
-                    self.controller.scan_get_detector_array(self.uiHandle, DE_4, dDetector4Sync, iPointsNumber)
-                else:
-                    getattr(self.controller, self.model+"_ScanGetDetectorArra")(self.uiHandle, DE_4, ct.byref(dDetector4Sync), iPointsNumber)
+                self.controller.scan_get_detector_array(self.uiHandle, DE_4, dDetector4Sync, iPointsNumber)
                 results_raw["4"] = np.array(dDetector4Sync, dtype=float)
 
             results = results_raw
@@ -907,10 +832,7 @@ class Scan:
     def set_input_source(self, value):
         assert value in range(1,self.dev._NBR_INPUT+1), f"Laser number can only be among {[i for i in range(1,self.dev._NBR_INPUT+1)]}, not {value}"
         self._input_source = int(value)
-        if self.model == "CT440":
-            self.controller.switch_input(self.uiHandle, self._input_source)
-        else:
-            getattr(self.controller, self.model+"_SwitchInput")(self.uiHandle, self._input_source)  # BUG: doesn't work for me (ct400)
+        self.controller.switch_input(self.uiHandle, self._input_source)  # BUG: doesn't work for me (ct400)
 
 
     def get_driver_model(self):
@@ -968,7 +890,7 @@ class Detectors:
     def __init__(self, dev, libpath):
         self.libpath = libpath
 
-        self.dev = dev  # used by the laser
+        self.dev = dev  # used by the laser. dev is Driver
         self.model = self.dev.model
 
         try:
@@ -982,67 +904,41 @@ class Detectors:
                 from ct440_lib import CT440
                 self.controller = CT440(self.libpath)
             else:
-                ct.windll.LoadLibrary(os.path.join(os.path.dirname(self.libpath), "SiUSBXp.dll"))  # ct400 only and not always necessary
-                self.controller = ct.windll.LoadLibrary(self.libpath)  # OPTIMIZE: could create ct400_lib to simplify code (by removing all if model == ... in this file)
+                from ct400_lib import CT400
+                # ct.windll.LoadLibrary(os.path.join(os.path.dirname(self.libpath), "SiUSBXp.dll"))  # ct400 only and not always necessary
+                self.controller = CT400(self.libpath)
         except OSError:
             raise OSError(f"Can't found the {self.model}")
 
-
-        if self.model == "CT440":
-        	iError = ct.c_int32()
-        	uiHandle = self.controller.init(iError)
-        else:
-            try:       
-                uiHandle = ct.c_longlong(getattr(self.controller, self.model+"_Init")())
-                self._NBR_INPUT = getattr(self.controller, self.model+"_GetNbInputs")(self.uiHandle)
-            except Exception:
-                self.controller.CT400_Init.argtypes = [ct.POINTER(ct.c_int32)]
-                self.controller.CT400_Init.restype = ct.c_uint64
-                iError = ct.c_int32()
-                uiHandle = ct.c_longlong(getattr(self.controller, self.model+"_Init")(iError))
-        assert uiHandle != 0, CONNECTION_ERROR
-
+        iError = ct.c_int32()
+        uiHandle = self.controller.init(iError)
         self.uiHandle = uiHandle
 
-        if self.model == "CT440":
-            self._NBR_INPUT = self.controller.get_nb_inputs(self.uiHandle)
+        if self.uiHandle:
+            pass
         else:
-            self._NBR_INPUT = getattr(self.controller, self.model+"_GetNbInputs")(self.uiHandle)
-        if self.model == "CT440":
-            self._NBR_DETECTOR = self.controller.get_nb_detectors(self.uiHandle)
-        else:
-            self._NBR_DETECTOR = getattr(self.controller, self.model+"_GetNbDetectors")(self.uiHandle)
+            raise ConnectionError(CONNECTION_ERROR)
 
-        if self.model == "CT440":
-            #  CT440 option (0: SMF, 1: PM13, 2: PM15)
-            if (self.controller.get_ct440_type(self.uiHandle) == 1):
-                self._OPTION = "PM13 (1260-1360 nm)"
-            elif (self.controller.get_ct440_type(self.uiHandle) == 2):
-                self._OPTION = "PM15 (1440-1640 nm)"
-            else:
-                self._OPTION = "SMF(1240-1680nm)"
+        self._NBR_INPUT = self.controller.get_nb_inputs(self.uiHandle)
+        self._NBR_DETECTOR = self.controller.get_nb_detectors(self.uiHandle)
 
+        #  CT440 option (0: SMF, 1: PM13, 2: PM15)
+        if (self.controller.get_ct440_type(self.uiHandle) == 1):
+            self._OPTION = "PM13 (1260-1360 nm)"
+        elif (self.controller.get_ct440_type(self.uiHandle) == 2):
+            self._OPTION = "PM15 (1440-1640 nm)"
         else:
-            self._OPTION = getattr(self.controller, self.model+"_Get"+self.model+"Type")(self.uiHandle)
+            self._OPTION = "SMF(1240-1680nm)"
 
-        if self.model == "CT440":
-            assert self.controller.check_connected(self.uiHandle), CONNECTION_ERROR
-        else:
-            assert getattr(self.controller, self.model+"_CheckConnected")(self.uiHandle), CONNECTION_ERROR
+        assert self.controller.check_connected(self.uiHandle), CONNECTION_ERROR
 
 
     def get_spectral_lines(self):
-        if self.model == "CT440":
-            iLinesDetected = self.controller.get_nb_lines_detected(self.uiHandle)
-        else:
-            iLinesDetected = getattr(self.controller, self.model+"_GetNbLinesDetected")(self.uiHandle)
+        iLinesDetected = self.controller.get_nb_lines_detected(self.uiHandle)
         LinesArraySize = ct.c_double * iLinesDetected
         dLinesValues = LinesArraySize()
 
-        if self.model == "CT440":
-            self.controller.scan_get_lines_detection_array(self.uiHandle, dLinesValues, iLinesDetected)
-        else:
-            getattr(self.controller, self.model+"_ScanGetLinesDetectionArray")(self.uiHandle, ct.byref(dLinesValues) ,iLinesDetected)
+        self.controller.scan_get_lines_detection_array(self.uiHandle, dLinesValues, iLinesDetected)
         return dLinesValues
 
 
@@ -1050,10 +946,7 @@ class Detectors:
         PowerArraySize = ct.c_double * 1
         (Pout, P1, P2, P3, P4, Vext) = (PowerArraySize(), PowerArraySize(), PowerArraySize(), PowerArraySize(), PowerArraySize(), PowerArraySize())
 
-        if self.model == "CT440":
-            self.controller.read_power_detectors(self.uiHandle, Pout, P1, P2, P3, P4, Vext)  # byref seems to be not usefull thanks to ct440_lib definition as pointer
-        else:
-            getattr(self.controller, self.model+"_ReadPowerDetectors")(self.uiHandle, ct.byref(Pout), ct.byref(P1), ct.byref(P2), ct.byref(P3), ct.byref(P4), ct.byref(Vext))
+        self.controller.read_power_detectors(self.uiHandle, Pout, P1, P2, P3, P4, Vext)
         (Pout, P1, P2, P3, P4, Vext) = (float(Pout[0]), float(P1[0]), float(P2[0]), float(P3[0]), float(P4[0]), float(Vext[0]))
         (Pout, P1, P2, P3, P4, Vext) = (round(Pout, 3), round(P1, 3), round(P2, 3), round(P3, 3), round(P4, 3), round(Vext, 3))
         return Pout, P1, P2, P3, P4, Vext
@@ -1097,17 +990,10 @@ class Detectors:
         config.append({'element':'variable','name':'Vext','unit':'V','type':float,
                         'read':self.get_vext,'help':'Voltage ext in V'})
 
-        # config.append({'element':'action','name':'connect_ct400','do':self.connect, "help": "Try to connect the ct400"})
         return config
 
-
     def close(self):
-        if hasattr(self, "controller"):
-            if self.model == "CT440":
-                self.controller.close(self.uiHandle)
-            else:
-                getattr(self.controller, self.model+"_Close")(self.uiHandle)
-
+        self.controller.close(self.uiHandle)
 
 
 class Driver():

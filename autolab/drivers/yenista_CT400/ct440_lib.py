@@ -55,10 +55,6 @@ class CT440:
         dll.CT440_Init.argtypes = [POINTER(c_int32)]
         dll.CT440_Init.restype = c_uint64
         self.init = dll.CT440_Init
-        # TODO: test if could resolve problem of access violation error for ct400
-        # dll.CT400_Init.argtypes = [POINTER(c_void_p)]
-        # dll.CT400_Init.restype = c_uint64
-        # self.init = dll.CT400_Init
 
         dll.CT440_CheckConnected.argtypes = [c_uint64]
         dll.CT440_CheckConnected.restype = c_int32
@@ -71,10 +67,6 @@ class CT440:
         dll.CT440_GetNbDetectors.argtypes = [c_uint64]
         dll.CT440_GetNbDetectors.restype = c_int32
         self.get_nb_detectors = dll.CT440_GetNbDetectors
-        # TODO: test on ct400
-        # dll.CT400_GetNbDetectors.argtypes = [c_uint64]
-        # dll.CT400_GetNbDetectors.restype = c_int32
-        # self.get_nb_detectors = dll.CT400_GetNbDetectors
 
         dll.CT440_GetCT440Type.argtypes = [c_uint64]
         dll.CT440_GetCT440Type.restype = c_int32
@@ -194,7 +186,7 @@ class CT440:
 
         dll.CT440_UpdateWavelengthReference.argtypes = [c_uint64, c_double, c_double]
         dll.CT440_UpdateWavelengthReference.restype = c_int32
-        self.update_wavelenfth_reference = dll.CT440_UpdateWavelengthReference
+        self.update_wavelength_reference = dll.CT440_UpdateWavelengthReference
 
         dll.CT440_ResetCalibration.argtypes = [c_uint64]
         dll.CT440_ResetCalibration.restype = c_int32
@@ -243,6 +235,6 @@ class CT440:
         dll.CT440_CalcPDL4OneDET.restype = c_int32
         self.calc_pdl_4onedet = dll.CT440_CalcPDL4OneDET
 
-        dll.CT440_SetLaser2.argtypes = [c_uint64, rLaserInput, rEnable, c_char_p, rLaserInput, c_double, c_double, c_int32]
+        dll.CT440_SetLaser2.argtypes = [c_uint64, rLaserInput, rEnable, c_char_p, rLaserSource, c_double, c_double, c_int32]
         dll.CT440_SetLaser2.restype = c_int32
         self.set_laser2 = dll.CT440_SetLaser2
