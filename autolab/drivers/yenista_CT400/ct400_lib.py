@@ -2,6 +2,7 @@
 # Based on the example provided by EXFO with the CT400
 # =============================================================================
 
+import os
 from ctypes import windll, POINTER, c_int32, c_uint64, c_double, c_char_p
 from enum import IntEnum
 
@@ -48,6 +49,7 @@ class CT400:
     def __init__(self, libpath):
 
         # specify the path for the CT400 DLL.
+        windll.LoadLibrary(os.path.join(os.path.dirname(libpath), "SiUSBXp.dll"))  # ct400 only and not always necessary
         dll = windll.LoadLibrary(libpath)
 
         # Definition of DLL functions
@@ -70,7 +72,7 @@ class CT400:
 
         dll.CT400_GetCT400Type.argtypes = [c_uint64]
         dll.CT400_GetCT400Type.restype = c_int32
-        self.get_ct400_type = dll.CT400_GetCT400Type
+        self.get_ct_type = dll.CT400_GetCT400Type
 
         dll.CT400_SetLaser.argtypes = [c_uint64, rLaserInput, rEnable, c_int32, rLaserSource, c_double, c_double, c_int32 ]
         dll.CT400_SetLaser.restype = c_int32
@@ -80,7 +82,7 @@ class CT400:
         dll.CT400_SetScan.restype = c_int32
         self.set_scan = dll.CT400_SetScan
 
-        dll.CT400_SetSamplingResolution.argtypes = [c_uint64, c_double]
+        dll.CT400_SetSamplingResolution.argtypes = [c_uint64, c_uint64]
         dll.CT400_SetSamplingResolution.restype = c_int32
         self.set_resolution = dll.CT400_SetSamplingResolution
 

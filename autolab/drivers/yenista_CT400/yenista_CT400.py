@@ -905,7 +905,6 @@ class Detectors:
                 self.controller = CT440(self.libpath)
             else:
                 from ct400_lib import CT400
-                # ct.windll.LoadLibrary(os.path.join(os.path.dirname(self.libpath), "SiUSBXp.dll"))  # ct400 only and not always necessary
                 self.controller = CT400(self.libpath)
         except OSError:
             raise OSError(f"Can't found the {self.model}")
@@ -922,10 +921,10 @@ class Detectors:
         self._NBR_INPUT = self.controller.get_nb_inputs(self.uiHandle)
         self._NBR_DETECTOR = self.controller.get_nb_detectors(self.uiHandle)
 
-        #  CT440 option (0: SMF, 1: PM13, 2: PM15)
-        if (self.controller.get_ct440_type(self.uiHandle) == 1):
+        #  CT440 and CT400 option (0: SMF, 1: PM13, 2: PM15)
+        if (self.controller.get_ct_type(self.uiHandle) == 1):
             self._OPTION = "PM13 (1260-1360 nm)"
-        elif (self.controller.get_ct440_type(self.uiHandle) == 2):
+        elif (self.controller.get_ct_type(self.uiHandle) == 2):
             self._OPTION = "PM15 (1440-1640 nm)"
         else:
             self._OPTION = "SMF(1240-1680nm)"
@@ -1019,7 +1018,8 @@ class Driver():
         if not hasattr(self.detectors, "_NBR_INPUT"):
             self.detectors._NBR_INPUT = 4
 
-        self.nl = self.detectors._NBR_INPUT
+        self.nl = len(self.config['address'])
+       
         for i in range(1,self.nl+1):
             setattr(self,f'laser{i}',Laser(self.detectors,i))
 

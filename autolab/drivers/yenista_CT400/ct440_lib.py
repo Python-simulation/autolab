@@ -70,7 +70,7 @@ class CT440:
 
         dll.CT440_GetCT440Type.argtypes = [c_uint64]
         dll.CT440_GetCT440Type.restype = c_int32
-        self.get_ct440_type = dll.CT440_GetCT440Type
+        self.get_ct_type = dll.CT440_GetCT440Type
 
         dll.CT440_GetCT440Model.argtypes = [c_uint64]
         dll.CT440_GetCT440Model.restype = c_int32
