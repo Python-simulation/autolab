@@ -208,21 +208,25 @@ class DataManager :
         if not filenames:
             return
         else:
+            self.importAction(filenames)
 
-            for i, filename in enumerate(filenames):
-                path = os.path.dirname(filename)
-                paths.USER_LAST_CUSTOM_FOLDER = path
+    def importAction(self, filenames):
 
-                try :
-                    dataset = self.importData(filename)
-                except Exception as error:
-                    self.gui.statusBar.showMessage(f"Impossible to load data from {filename}: {error}",10000)
-                    if len(filenames) != 1:
-                        print(f"Impossible to load data from {filename}: {error}")
-                else:
-                    self.gui.statusBar.showMessage(f"File {filename} loaded successfully",5000)
+        for i, filename in enumerate(filenames):
 
-                    self.gui.figureManager.start(dataset)
+            try :
+                dataset = self.importData(filename)
+            except Exception as error:
+                self.gui.statusBar.showMessage(f"Impossible to load data from {filename}: {error}",10000)
+                if len(filenames) != 1:
+                    print(f"Impossible to load data from {filename}: {error}")
+            else:
+                self.gui.statusBar.showMessage(f"File {filename} loaded successfully",5000)
+
+                self.gui.figureManager.start(dataset)
+
+        path = os.path.dirname(filename)
+        paths.USER_LAST_CUSTOM_FOLDER = path
 
     def importDeviceData(self, deviceVariable):
         """ This function open the data of the provided device """

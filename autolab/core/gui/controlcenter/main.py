@@ -36,13 +36,16 @@ class ControlCenter(QtWidgets.QMainWindow):
         self.activateWindow()
 
         # Tree widget configuration
+        self.tree.last_drag = None
+        self.tree.gui = self
         self.tree.setHeaderLabels(['Objects','Type','Actions','Values',''])
         self.tree.header().setDefaultAlignment(QtCore.Qt.AlignCenter)
         self.tree.header().resizeSection(0, 200)
         self.tree.header().resizeSection(4, 15)
-
+        self.tree.setDragDropMode(QtWidgets.QAbstractItemView.DragOnly)
         self.tree.header().setStretchLastSection(False)
         self.tree.itemClicked.connect(self.itemClicked)
+        self.tree.itemPressed.connect(self.itemPressed)
         self.tree.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self.rightClick)
         self.tree.setAlternatingRowColors(True)
@@ -158,6 +161,17 @@ class ControlCenter(QtWidgets.QMainWindow):
             self.associate(item)
             item.setExpanded(True)
 
+    def itemPressed(self,item):
+
+        """ Function called when a click (not released) has been detected in the tree.
+            Store last dragged variable in tree so scanner can know it when it is dropped there """
+
+        if hasattr(item, "name"):
+            self.tree.last_drag = None
+        if hasattr(item, "variable"):
+            self.tree.last_drag = item.variable
+        elif hasattr(item, "action"):
+            self.tree.last_drag = item.action
 
 
     def associate(self,item):

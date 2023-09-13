@@ -106,6 +106,20 @@ class Plotter(QtWidgets.QMainWindow):
         self.delay_lineEdit.textEdited.connect(lambda : self.setLineEditBackground(self.delay_lineEdit,'edited'))
         self.setLineEditBackground(self.delay_lineEdit,'synced')
 
+        self.setAcceptDrops(True)
+
+    def dropEvent(self, event):
+        """ Import data from filenames dropped """
+        filenames = [e.toLocalFile() for e in event.mimeData().urls()]
+        self.dataManager.importAction(filenames)
+
+    def dragEnterEvent(self, event):
+        """ Check that drop filenames """
+        if event.mimeData().hasUrls():
+            event.accept()
+        else:
+            event.ignore()
+
     def overwriteDataChanged(self):
         """ Set overwrite name for data import """
 
