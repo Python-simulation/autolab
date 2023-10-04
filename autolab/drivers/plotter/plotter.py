@@ -13,6 +13,6 @@ from autolab.core.gui.plotting.analyze import AnalyzeManager as Driver
 # To use plotter functions in recipe, should use this driver that is seperate from the GUI.
 
 class Driver_DEFAULT(Driver):
-    def __init__(self):
+    def __init__(self, gui=None):
 
-        Driver.__init__(self)
+        Driver.__init__(self, gui=gui)

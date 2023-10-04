@@ -4,25 +4,56 @@ Created on Oct 2022
 
 @author: jonathan based on qchat
 """
-from PyQt5 import QtCore, QtWidgets, uic
+from PyQt5 import QtCore, QtWidgets, uic, QtGui
 import os
 
 from .figure import FigureManager
 from .data import DataManager
 from .analyze import AnalyzeManager
+from .thread import ThreadManager
+from .treewidgets import TreeWidgetItemModule
+
+from ... import devices
+from ... import drivers
+from ... import config
+
+
+class MyQTreeWidget(QtWidgets.QTreeWidget):
+
+    reorderSignal = QtCore.pyqtSignal(object)
+
+    def __init__(self,parent, plotter):
+        self.plotter = plotter
+        QtWidgets.QTreeWidget.__init__(self,parent)
+
+        self.setAcceptDrops(True)
+
+    def dropEvent(self, event):
+
+        """ This function is used to add a plugin to the plotter """
+
+        variable = event.source().last_drag
+        if type(variable) == str:
+            self.plotter.addPlugin(variable)
+
+    def dragEnterEvent(self, event):
+
+        if (event.source() is self) or (
+                hasattr(event.source(), "last_drag") and type(event.source().last_drag) is str):
+            event.accept()
+        else:
+            event.ignore()
+
 
 
 class Plotter(QtWidgets.QMainWindow):
 
-    def __init__(self,mainGui):#, driver=None):
-
-        # if driver is not None:
-        #     # OLD TODO: implement connection here (see ct400)
-        #     # Will not do it because it is not good to mixed GUI and drivers
-        #     pass
+    def __init__(self,mainGui):
 
         self.active = False
         self.mainGui = mainGui
+        self.all_plugin_dict = dict()
+        self.active_plugin_dict = dict()
 
         # Configuration of the window
         QtWidgets.QMainWindow.__init__(self)
@@ -35,6 +66,7 @@ class Plotter(QtWidgets.QMainWindow):
         self.dataManager = DataManager(self)
         self.analyzeManager = AnalyzeManager()
 
+        self.threadManager = ThreadManager(self)
         # Save button
         self.save_pushButton.clicked.connect(self.dataManager.saveButtonClicked)
         self.save_pushButton.setEnabled(False)
@@ -63,26 +95,6 @@ class Plotter(QtWidgets.QMainWindow):
             getattr(self,f'autoscale_{axe}_checkBox').stateChanged.connect(lambda b, axe=axe:self.figureManager.autoscaleChanged(axe))
             getattr(self,f'autoscale_{axe}_checkBox').setChecked(True)
 
-        # Target Value line edit
-        self.targetValue_lineEdit.setText("-1")
-        self.targetValue_lineEdit.returnPressed.connect(self.targetValueChanged)
-        self.targetValue_lineEdit.textEdited.connect(lambda : self.setLineEditBackground(self.targetValue_lineEdit,'edited'))
-        self.setLineEditBackground(self.targetValue_lineEdit,'synced')
-
-        # Depth Value spinbox edit
-        self.depthValue_spinBox.setValue(1)
-        self.depthValue_spinBox.valueChanged.connect(self.depthValueChanged)
-
-        # Level Value doublespinbox edit
-        self.levelValue_doubleSpinBox.setValue(-3.)
-        self.levelValue_doubleSpinBox.valueChanged.connect(self.levelValueChanged)
-
-        # Greater Less
-        self.greaterRadioButton.toggled.connect(self.greaterChanged)
-
-        # Cursor checkbox
-        self.displayCursorCheckBox.clicked.connect(self.displayCursorCheckBoxClicked)
-
         self.device_lineEdit.setText(f'{self.dataManager.deviceValue}')
         self.device_lineEdit.returnPressed.connect(self.deviceChanged)
         self.device_lineEdit.textEdited.connect(lambda : self.setLineEditBackground(self.device_lineEdit,'edited'))
@@ -108,6 +120,124 @@ class Plotter(QtWidgets.QMainWindow):
 
         self.setAcceptDrops(True)
 
+        self.processPlugin()
+
+    def itemClicked(self,item):
+
+        """ Function called when a normal click has been detected in the tree.
+            Check the association if it is a main item """
+
+        if item.parent() is None and item.loaded is False :
+            self.associate(item)
+            item.setExpanded(True)
+
+    def rightClick(self,position):
+
+        """ Function called when a right click has been detected in the tree """
+
+        item = self.tree.itemAt(position)
+        if hasattr(item,'menu') :
+            item.menu(position)
+
+    def processPlugin(self):
+
+        # Create frame
+        self.frame = QtWidgets.QFrame()
+        self.splitter_2.insertWidget(1, self.frame)
+        self.frame.setFrameShape(QtWidgets.QFrame.StyledPanel)
+        layout = QtWidgets.QVBoxLayout(self.frame)
+
+        label = QtWidgets.QLabel('Plugin:',self.frame)
+        layout.addWidget(label)
+        font = QtGui.QFont()
+        font.setBold(True)
+        label.setFont(font)
+
+        # Tree widget configuration
+        self.tree = MyQTreeWidget(self.frame, self)
+        layout.addWidget(self.tree)
+        self.tree.setHeaderLabels(['Plugin','Type','Actions','Values',''])
+        self.tree.header().setDefaultAlignment(QtCore.Qt.AlignCenter)
+        self.tree.header().resizeSection(0, 170)
+        self.tree.header().hideSection(1)
+        self.tree.header().resizeSection(2, 50)
+        self.tree.header().resizeSection(3, 70)
+        self.tree.header().resizeSection(4, 15)
+        self.tree.header().setStretchLastSection(False)
+        self.tree.setAlternatingRowColors(True)
+
+        self.tree.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
+        self.tree.itemClicked.connect(self.itemClicked)
+        self.tree.customContextMenuRequested.connect(self.rightClick)
+
+        plotter_config = config.load_config("plotter")
+
+        if 'plugin' in plotter_config.sections() and len(plotter_config['plugin']) != 0:
+            self.splitter_2.setSizes([200,300,80,80])
+            for plugin_nickname in plotter_config['plugin'].keys() :
+                plugin_name = plotter_config['plugin'][plugin_nickname]
+                self.addPlugin(plugin_name, plugin_nickname)
+        else:
+            self.splitter.setSizes([400,40])
+            self.splitter_2.setSizes([200,80,80,80])
+
+
+    def addPlugin(self, plugin_name, plugin_nickname=None):
+
+        if plugin_nickname is None:
+            plugin_nickname = plugin_name
+
+        if plugin_name in devices.list_devices():
+            plugin_nickname = self.getUniqueName(plugin_nickname)
+            item = TreeWidgetItemModule(self.tree,plugin_name,plugin_nickname,self)
+            item.setBackground(0, QtGui.QColor('#9EB7F5'))  # blue
+            item.setExpanded(True)
+
+            self.associate(item)
+        else:
+            self.statusBar.showMessage(f"Error: plugin {plugin_name} not found in devices_config.ini",5000)
+
+    def associate(self, item):
+        plugin_name = item.name
+        plugin_nickname = item.nickname
+        device_config = devices.get_final_device_config(plugin_name)
+
+        try:
+            instance = drivers.get_driver(device_config['driver'],
+                                           device_config['connection'],
+                                           **{ k:v for k,v in device_config.items() if k not in ['driver','connection']},
+                                           gui=self)
+        except Exception:
+            instance = drivers.get_driver(device_config['driver'],
+                                           device_config['connection'],
+                                           **{ k:v for k,v in device_config.items() if k not in ['driver','connection']})
+        module = devices.Device(plugin_name,instance)
+
+        item.load(module)
+        self.active_plugin_dict[plugin_nickname] = module
+        self.all_plugin_dict[plugin_nickname] = module
+
+        try:
+            data = self.dataManager.getLastSelectedDataset().data
+            data = data[[self.figureManager.getLabel("x"),self.figureManager.getLabel("y")]].copy()
+            module.instance.refresh(data)
+        except Exception:
+            pass
+
+    def getUniqueName(self,basename):
+        """ This function adds a number next to basename in case this basename is already taken """
+        names = self.all_plugin_dict.keys()
+        name = basename
+
+        compt = 0
+        while True :
+            if name in names :
+                compt += 1
+                name = basename+'_'+str(compt)
+            else :
+                break
+        return name
+
     def dropEvent(self, event):
         """ Import data from filenames dropped """
         filenames = [e.toLocalFile() for e in event.mimeData().urls()]
@@ -119,6 +249,22 @@ class Plotter(QtWidgets.QMainWindow):
             event.accept()
         else:
             event.ignore()
+
+    def plugin_refresh(self):
+        if self.active_plugin_dict:
+            self.clearStatusBar()
+            if hasattr(self.dataManager.getLastSelectedDataset(),"data"):
+                data = self.dataManager.getLastSelectedDataset().data
+                data = data[[self.figureManager.getLabel("x"),self.figureManager.getLabel("y")]].copy()
+            else:
+                data = None
+
+            for module in self.active_plugin_dict.values():
+                if hasattr(module.instance, "refresh"):
+                    try:
+                        module.instance.refresh(data)
+                    except Exception as error:
+                        self.statusBar.showMessage(f"Error in plugin {module.name}: '{error}'",5000)
 
     def overwriteDataChanged(self):
         """ Set overwrite name for data import """
@@ -211,106 +357,6 @@ class Plotter(QtWidgets.QMainWindow):
         if check is True and self.variable_y_comboBox.currentIndex() != -1 :
             self.figureManager.reloadData()
 
-    def depthValueChanged(self):
-        """ This function start the update of the target value in the data manager
-        when a changed has been detected """
-
-        # Send the new value
-        try:
-            value = int(self.depthValue_spinBox.value())
-            self.dataManager.setDepthValue(value)
-        except:
-            pass
-
-        # Rewrite the GUI with the current value
-        value = int(self.dataManager.getDepthValue())
-        self.depthValue_spinBox.setValue(value)
-
-        self.displayCursorCheckBoxClicked()
-
-    def levelValueChanged(self):
-        """ This function start the update of the target value in the data manager
-        when a changed has been detected """
-
-        # Send the new value
-        try:
-            value = float(self.levelValue_doubleSpinBox.value())
-            self.dataManager.setLevelValue(value)
-        except:
-            pass
-
-        # Rewrite the GUI with the current value
-        value = float(self.dataManager.getLevelValue())
-        self.levelValue_doubleSpinBox.setValue(value)
-
-        self.displayCursorCheckBoxClicked()
-
-    def targetValueChanged(self):
-        """ This function start the update of the target value in the data manager
-        when a changed has been detected """
-
-        # Send the new value
-        try:
-            value = float(self.targetValue_lineEdit.text())
-            self.dataManager.setTargetValue(value)
-        except:
-            pass
-
-        # Rewrite the GUI with the current value
-        value = self.dataManager.getTargetValue()
-        self.targetValue_lineEdit.setText(f'{value}')
-        self.setLineEditBackground(self.targetValue_lineEdit,'synced')
-
-        self.displayCursorCheckBoxClicked()
-
-    def greaterChanged(self):
-        self.dataManager.setComparatorState(self.greaterRadioButton.isChecked())
-        self.displayCursorCheckBoxClicked()
-
-    def displayCursorCheckBoxClicked(self):
-        """ This function set the cursors ON/OFF """
-
-        if self.displayCursorCheckBox.isChecked():
-            self.display3dbButtonClicked()
-        else:
-            self.figureManager.displayCursors([None]*3, [None]*3)
-
-    def display3dbButtonClicked(self):
-        """ Function to calculate and display cursors """
-        self.clearStatusBar()
-
-        targetValue = self.dataManager.getTargetValue()
-        depth = self.dataManager.getDepthValue()
-        level = self.dataManager.getLevelValue()
-        comparator = self.dataManager.getComparatorState()  # np.greater or np.less
-
-        if targetValue == -1:
-            targetValue = "default"
-
-        try:
-            self.analyzeManager.data.set_data_name(self.dataManager.getLastSelectedDataset().name)
-            self.analyzeManager.data.add_data(self.dataManager.getLastSelectedDataset().data)
-            self.analyzeManager.data.set_x_label(self.figureManager.getLabel("x"))
-            self.analyzeManager.data.set_y_label(self.figureManager.getLabel("y"))
-
-            # TODO: add  x_left right.. output to GUI
-            results = self.analyzeManager.analyze.bandwidth.search_bandwitdh(targetValue, depth=depth, level=level, comparator=comparator)
-            x_left = results["x_left"]
-            x_right = results["x_right"]
-            x_max = results["x_max"]
-            y_left = results["y_left"]
-            y_right = results["y_right"]
-            y_max = results["y_max"]
-
-            x = [x_left, x_max, x_right]
-            y = [y_left, y_max, y_right]
-
-            if self.displayCursorCheckBox.isChecked():
-                self.figureManager.displayCursors(x, y)
-
-        except Exception as error:
-            self.statusBar.showMessage(f"Can't display markers: {error}",10000)
-
 
     def closeEvent(self,event):
         """ This function does some steps before the window is really killed """
@@ -366,6 +412,19 @@ class Plotter(QtWidgets.QMainWindow):
         self.timer.setInterval(int(value*1000))  # ms
         self.setLineEditBackground(self.delay_lineEdit,'synced')
 
+
+    def setStatus(self,message, timeout=0):
+
+        """ Modify the message displayed in the status bar """
+
+        self.statusBar.showMessage(message, msecs=timeout)
+
+
+    def clearStatus(self):
+
+        """ Erase the message displayed in the status bar """
+
+        self.setStatus('')
 
 def cleanString(name):
 

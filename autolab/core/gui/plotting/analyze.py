@@ -5,171 +5,151 @@ Created on Mon Jun 13 21:26:10 2022
 @author: jonathan
 """
 
-import os
-import time
+import csv
 
 import numpy as np
 import pandas as pd
 
-from .data import DataManager
+
+try:
+    from pandas._libs.lib import no_default
+except:
+    no_default = None
 
 
-class Data:
-    pass
+def find_delimiter(filename):
+    sniffer = csv.Sniffer()
+    with open(filename) as fp:
+        try:
+            text = fp.read(5000)
+            if text.startswith("#"):
+                text = text[len(text.split("\n")[0])+len("\n"):]
+            delimiter = sniffer.sniff(text).delimiter
+        except:
+            # delimiter = ","  # only 1 column
+            delimiter = no_default
+        if delimiter in ("e", "."):  # sniffer got it wrong
+            delimiter = no_default
+    return delimiter
 
-# TODO: merge data.py and analyze.py
-# Currently set some data.py functions as staticmethod and imported them here
+
+def _skiprows(filename):
+    with open(filename) as fp:
+        skiprows = 1 if fp.read(1) == "#" else None
+    return skiprows
+
+
+def find_header(filename, sep=no_default, skiprows=None):
+    df = pd.read_csv(filename, sep=sep, header=None, nrows=5, skiprows=skiprows)
+    try:
+        first_row = df.iloc[0].values.astype("float")
+        return "infer" if tuple(first_row) == tuple([i for i in range(len(first_row))]) else None
+    except:
+        pass
+    df_header = pd.read_csv(filename, sep=sep, nrows=5)
+
+    return "infer" if tuple(df.dtypes) != tuple(df_header.dtypes) else None
+
+
+def formatData(data):
+    """ Format data """
+
+    try:
+        data = pd.DataFrame(data)
+    except ValueError:
+        data = pd.DataFrame([data])
+    data.columns = data.columns.astype(str)
+    data_type = data.values.dtype
+    data[data.columns] = data[data.columns].apply(pd.to_numeric, errors="coerce")
+    assert not data.isnull().values.all(), f"Datatype '{data_type}' not supported"
+
+    if data.shape[1] == 1:
+        data.rename(columns = {'0':'1'}, inplace=True)
+        data.insert(0, "0", range(data.shape[0]))
+    return data
+
+
+def importData(filename):
+    """ This function open the data with the provided filename """
+
+    skiprows = _skiprows(filename)
+    sep = find_delimiter(filename)
+    header = find_header(filename, sep, skiprows)
+    try:
+        data = pd.read_csv(filename, sep=sep, header=header, skiprows=skiprows)
+    except:
+        data = pd.read_csv(filename, sep="\t", header=header, skiprows=skiprows)
+
+    data = formatData(data)
+    return data
+
 
 class AnalyzeManager :
 
-    def __init__(self):
+    def __init__(self, gui=None):
 
-        self.data = DataModule()
-        self.analyze = AnalyzeModule(self.data)
+        if gui:
+            self.gui = gui
+            self.ax = self.gui.figureManager.ax
+            self.cursor_left_y = self.ax.plot([None],[None],'--',color='grey', label="Cursor left y")[0]
+            self.cursor_right_y = self.ax.plot([None],[None],'--',color='grey', label="Cursor right y")[0]
+            self.cursor_extremum = self.ax.plot([None],[None],'--',color='grey', label="Cursor max")[0]
+            self.cursor_left_x = self.ax.plot([None],[None],'--',color='grey', label="Cursor left x")[0]
+            self.cursor_right_x = self.ax.plot([None],[None],'--',color='grey', label="Cursor right x")[0]
 
-    def get_driver_model(self):
+        self.data = pd.DataFrame()
+        self.x_label = ""
+        self.y_label = ""
+        self.isDisplayCursor = False
 
-        config = []
+        self.info = DataModule(self)
+        self.min = MinModule(self)
+        self.max = MaxModule(self)
+        self.mean = MeanModule(self)
+        self.std = StdModule(self)
+        self.bandwidth = BandwidthModule(self)
 
-        config.append({'element':'variable','name':'available_data',
-                       'read':self.data.getNames,
-                       'type':str,
-                       'help':'List of stored data'})
+    def get_displayCursor(self):
+        return bool(self.isDisplayCursor)
 
-        config.append({'element':'action','name':'open_prompt',
-                       'do':self.data.import_data,
-                       'help':'Open GUI prompt to add DataFrame'})
-
-        config.append({'element':'action','name':'open',
-                       'do':self.data.open,
-                       "param_type":str,
-                       'help':'Open data with the provided filename'})
-
-        config.append({'element':'action','name':'delete',
-                       'do':self.data.delete,
-                       "param_type":str,
-                       'help':'Delete data with the provided data_name'})
-
-        config.append({'element':'module','name':'data','object':getattr(self,'data')})
-        config.append({'element':'module','name':'analyze','object':getattr(self,'analyze')})
-
-
-        return config
-
-
-
-class AnalyzeModule:
-
-    def __init__(self, data):
-        self.data = data
-
-        self.min = MinModule(self.data)
-        self.max = MaxModule(self.data)
-        self.mean = MeanModule(self.data)
-        self.std = StdModule(self.data)
-        self.bandwidth = BandwidthModule(self.data)
-
-
-    def get_driver_model(self):
-
-        config = []
-
-        config.append({'element':'module','name':'min','object':getattr(self,'min')})
-        config.append({'element':'module','name':'max','object':getattr(self,'max')})
-        config.append({'element':'module','name':'mean','object':getattr(self,'mean')})
-        config.append({'element':'module','name':'std','object':getattr(self,'std')})
-        config.append({'element':'module','name':'bandwidth','object':getattr(self,'bandwidth')})
-
-        return config
-
-
-
-class DataModule:
-
-    def __init__(self):
-
-        self._sep = ","
-        self._extension = ".txt"
-        self._x_label = ""
-        self._y_label = ""
-
-        self._verbose = True
-        self._remove_zero = True
-
-        self._last_data_name = str()
-        self._data = dict()
-
+    def set_displayCursor(self, value):
+        value =  bool(int(float(value)))
+        self.isDisplayCursor = value
+        self.refresh(self.data)
 
     def get_x_label(self):
-        return self._x_label
+        return self.x_label
 
     def set_x_label(self, value):
         key = str(value)
         keys = self.get_keys()
         if key in keys:
-            self._x_label = key
+            self.x_label = key
         else:
-            self._x_label = ""
+            self.x_label = ""
 
 
     def get_y_label(self):
-        return self._y_label
+        return self.y_label
 
     def set_y_label(self, value):
         key = str(value)
         keys = self.get_keys()
         if key in keys:
-            self._y_label = key
+            self.y_label = key
         else:
-            self._y_label = ""
+            self.y_label = ""
 
 
     def get_keys(self):
-        data = self._data.get(self._last_data_name)
-        if data is not None:
-            return str(list(data.keys()))
-
-    def getNames(self):
-        return str(list(self._data.keys()))
-
-
-    def get_data_name(self):
-        return str(self._last_data_name)
-
-    def set_data_name(self, name):
-        self._last_data_name = str(name)
-
+        if self.data is not None:
+            return str(list(self.data.keys()))
 
     def get_data(self):
-        return pd.DataFrame(self._data.get(self._last_data_name))
+        return pd.DataFrame(self.data)
 
 
-    def delete(self, data_name):
-        data_name = str(data_name)
-
-        if self._data.get(data_name) is None:
-            raise KeyError(f"No data find for the name: '{data_name}'. " \
-                      f"Here is the list of available data: {self.getNames()}")
-
-        self._data.pop(data_name)
-
-        if data_name == self._last_data_name:
-            self._last_data_name = ""
-
-    def import_data(self):
-
-        """ This function prompts the user for a configuration filename,
-        and import the current scan configuration from it """
-
-        from PyQt5 import QtWidgets
-        # BUG: if open this prompt before Plotter, Scanner.., bad backend for GUI (old looking one) and can crash if not close immediately. Second time openned is ok
-        filename = QtWidgets.QFileDialog.getOpenFileName(caption="Import DataFrame file",
-                                                         filter="Text Files (*.txt);; Supported text Files (*.txt;*.csv;*.dat);; All Files (*)")[0]
-        if filename != '':
-            self.open(filename)
-
-
-    def add_data(self, value):
+    def set_data(self, value):
         """  Open data from DataFrame """
 
         df = pd.DataFrame(value)
@@ -179,20 +159,14 @@ class DataModule:
     def open(self, filename):
         """  Open data from file """
 
-        data = DataManager._importData(filename)
-
-        data_name = os.path.basename(filename)
-        names_list = self.getNames()
-        data_name = DataManager.getUniqueName(data_name, names_list)
-
-        self._last_data_name = data_name
+        data = importData(filename)
 
         self._open(data)
 
     def _open(self, df):
         """  Add data to dict """
 
-        self._data[self._last_data_name] = df
+        self.data = df
 
         try:
             self.set_x_label(df.keys()[0])
@@ -204,81 +178,135 @@ class DataModule:
         except:
             pass
 
-    def save(self, filename=None, data_name=None):
+    def refresh(self, data):
+        """ Called by plotter"""
 
-        """  Save data in txt file """
+        if hasattr(self, "gui"):
+            self.set_data(data)
 
-        if data_name is None:
-            data_name = self._last_data_name
+            if self.isDisplayCursor:
+                target_x = self.bandwidth.target_x
+                level = self.bandwidth.level
+                comparator = self.bandwidth._comparator
+                depth = self.bandwidth.depth
+                try:
+                    self.bandwidth.search_bandwitdh(target_x, level=level, comparator=comparator, depth=depth)
+                except Exception as error:
+                    if str(error) == "Empty dataframe":
+                        self.displayCursors([(None,None)]*3)
+                    else:
+                        self.gui.statusBar.showMessage(f"Can't display markers: {error}",10000)
+            else:
+                self.displayCursors([(None,None)]*3)
 
-        data = self._data.get(data_name, None)
+    def refresh_gui(self):
+        if hasattr(self, "gui") and self.isDisplayCursor:
+            results = self.bandwidth.results
+            cursors_coordinate = (results["left"], results["extremum"], results["right"])
 
-        if data is None:
-            message = f"No data find for the name: '{data_name}'. " \
-                      f"Here is the list of available data: {self.getNames()}"
-            raise KeyError(message)
+            try:
+                self.displayCursors(cursors_coordinate)
+            except Exception as error:
+                self.gui.statusBar.showMessage(f"Can't display markers: {error}",10000)
 
-        if filename is None or filename == "":
-            filename = self._last_data_name
+    def displayCursors(self, cursors_coordinate):
 
-        extension = os.path.splitext(filename)[1]
+        if hasattr(self, "gui"):
+            assert len(cursors_coordinate) == 3, f"This function only works with 3 cursors, {len(cursors_coordinate)} were given"
+            xmin, xmax = -1e99, 1e99
+            ymin, ymax = -1e99, 1e99
+            (left, extremum, right) = cursors_coordinate
 
-        if extension == "":
-            filename += self._extension
+            # left cursor
+            self.cursor_left_y.set_xdata([left[0], left[0]])
+            self.cursor_left_y.set_ydata([ymin, ymax])
 
-        file_exist = os.path.exists(filename)
+            # right cursor
+            self.cursor_right_y.set_xdata([right[0], right[0]])
+            self.cursor_right_y.set_ydata([ymin, ymax])
 
-        if file_exist:
-            raw_name, extension = os.path.splitext(filename)
-            t = f"_{time.strftime('%Y%m%d-%H%M%S')}"
-            filename = raw_name + t + extension
+            # extremum cursor
+            self.cursor_extremum.set_xdata([xmin, xmax])
+            self.cursor_extremum.set_ydata([extremum[1], extremum[1]])
+
+            # left 3db marker
+            self.cursor_left_x.set_xdata([xmin, xmax])
+            self.cursor_left_x.set_ydata([left[1], left[1]])
+
+            # right 3db marker
+            self.cursor_right_x.set_xdata([xmin, xmax])
+            self.cursor_right_x.set_ydata([right[1], right[1]])
+
+            # remove right 3db marker if same as left
+            if left[1] == right[1]:
+                self.cursor_right_x.set_xdata([None, None])
+                self.cursor_right_x.set_ydata([None, None])
+
+            self.gui.figureManager.redraw()
+
+    def get_driver_model(self):
+
+        config = []
+
+        if hasattr(self, "gui"):
+            config.append({'element':'variable','name':'displayCursor','type':bool,
+                           'read':self.get_displayCursor, 'write':self.set_displayCursor,
+                           "help": "Select if want to display cursors"})
+        else:
+            config.append({'element':'module','name':'info','object':getattr(self,'info')})
+
+            config.append({'element':'action','name':'open',
+                           'do':self.open,
+                           "param_type":str,
+                           "param_unit":"filename",
+                           'help':'Open data with the provided filename'})
+
+            config.append({'element':'variable','name':'data','type':pd.DataFrame,
+                           'read':self.get_data,
+                           "help": "Return data stored at data_name"})
+
+        config.append({'element':'module','name':'min','object':getattr(self,'min')})
+        config.append({'element':'module','name':'max','object':getattr(self,'max')})
+        config.append({'element':'module','name':'mean','object':getattr(self,'mean')})
+        config.append({'element':'module','name':'std','object':getattr(self,'std')})
+        config.append({'element':'module','name':'bandwidth','object':getattr(self,'bandwidth')})
+
+        return config
+
+    def close(self):
+        self.displayCursors([(None,None)]*3)
 
 
-        df = pd.DataFrame(data)
-        df.to_csv(filename, index=False, sep=self._sep)
+class DataModule:
 
-        if self._verbose:
-            print(f"DataFrame {data_name} saved at {filename}")
+    def __init__(self, analyzer):
+
+        self.analyzer = analyzer
 
 
     def get_driver_model(self):
 
         config = []
 
-        config.append({'element':'variable','name':'data_name',
-                       'read':self.get_data_name,'write':self.set_data_name,
-                       'type':str,
-                       'help':'Set data name'})
-
-        config.append({'element':'variable','name':'data_keys',
-                       'read':self.get_keys,
+        config.append({'element':'variable','name':'keys',
+                       'read':self.analyzer.get_keys,
                        'type':str,
                        'help':'Data keys'})
 
         config.append({'element':'variable','name':'x_label',
-                       'read':self.get_x_label,'write':self.set_x_label,
+                       'read':self.analyzer.get_x_label,'write':self.analyzer.set_x_label,
                        'type':str,
                        'help':'Set x_label to consider in analyze functions'})
 
         config.append({'element':'variable','name':'y_label',
-                       'read':self.get_y_label,'write':self.set_y_label,
+                       'read':self.analyzer.get_y_label,'write':self.analyzer.set_y_label,
                        'type':str,
                        'help':'Set y_label to consider in analyze functions'})
 
-
-        config.append({'element':'variable','name':'data','type':pd.DataFrame,
-                       'read':self.get_data,
-                       "help": "Return data stored at data_name"})
-
-        config.append({'element':'action','name':'add_data',
-                       'do':self.add_data,
-                       'param_type':pd.DataFrame,
-                       'help':'Add DataFrame to dict using data_name as key'})
-
-        config.append({'element':'action','name':'save',
-                       'do':self.save,
-                       'param_type':str,
-                       'help':'Save data with the provided filename'})
+        config.append({'element':'action','name':'set_data',
+                        'do':self.analyzer.set_data,
+                        'param_type':pd.DataFrame,
+                        'help':'Add DataFrame to dict using data_name as key'})
 
         return config
 
@@ -286,15 +314,15 @@ class DataModule:
 
 class MinModule:
 
-    def __init__(self, data):
-        self.data = data
+    def __init__(self, analyzer):
+        self.analyzer = analyzer
 
     def x(self):
-        index = np.argmin(self.data._data[self.data._last_data_name][self.data._y_label])
-        return self.data._data[self.data._last_data_name][self.data._x_label][index]
+        index = np.argmin(self.analyzer.data[self.analyzer.y_label])
+        return self.analyzer.data[self.analyzer.x_label][index]
 
     def y(self):
-        return np.min(self.data._data[self.data._last_data_name][self.data._y_label])
+        return np.min(self.analyzer.data[self.analyzer.y_label])
 
 
     def get_driver_model(self):
@@ -316,15 +344,15 @@ class MinModule:
 
 class MaxModule:
 
-    def __init__(self, data):
-        self.data = data
+    def __init__(self, analyzer):
+        self.analyzer = analyzer
 
     def x(self):
-        index = np.argmax(self.data._data[self.data._last_data_name][self.data._y_label])
-        return self.data._data[self.data._last_data_name][self.data._x_label][index]
+        index = np.argmax(self.analyzer.data[self.analyzer.y_label])
+        return self.analyzer.data[self.analyzer.x_label][index]
 
     def y(self):
-        return np.max(self.data._data[self.data._last_data_name][self.data._y_label])
+        return np.max(self.analyzer.data[self.analyzer.y_label])
 
 
     def get_driver_model(self):
@@ -346,14 +374,14 @@ class MaxModule:
 
 class MeanModule:
 
-    def __init__(self, data):
-        self.data = data
+    def __init__(self, analyzer):
+        self.analyzer = analyzer
 
     def x(self):
-        return np.mean(self.data._data[self.data._last_data_name][self.data._x_label])
+        return np.mean(self.analyzer.data[self.analyzer.x_label])
 
     def y(self):
-        return np.mean(self.data._data[self.data._last_data_name][self.data._y_label])
+        return np.mean(self.analyzer.data[self.analyzer.y_label])
 
 
     def get_driver_model(self):
@@ -376,14 +404,14 @@ class MeanModule:
 
 class StdModule:
 
-    def __init__(self, data):
-        self.data = data
+    def __init__(self, analyzer):
+        self.analyzer = analyzer
 
     def x(self):
-        return np.std(self.data._data[self.data._last_data_name][self.data._x_label])
+        return np.std(self.analyzer.data[self.analyzer.x_label])
 
     def y(self):
-        return np.std(self.data._data[self.data._last_data_name][self.data._y_label])
+        return np.std(self.analyzer.data[self.analyzer.y_label])
 
 
     def get_driver_model(self):
@@ -405,51 +433,56 @@ class StdModule:
 
 class BandwidthModule:
 
-    def __init__(self, data):
+    def __init__(self, analyzer):
 
-        self.data = data
+        self.analyzer = analyzer
         self.results = self.init_variables()
-        self._remove_zero = True
+        self.target_x = -1
+        self.level = -3.
+        self.depth = 1
         self.comparator = True
         self._comparator = np.greater
-        self.depth = 1
-        self.level = -3.
+        self._remove_zero = False
 
 
     def init_variables(self):
-        return {"x_left": 0, "y_left": -99,
-               "x_right": 0, "y_right": -99,
-                "x_max": 0, "y_max": -99}
+        return {"left": (0, -99), "extremum": (0, -99), "right": (0, -99)}
 
 
     def get_x_left(self):
-        return self.results["x_left"]
-
-    def get_x_right(self):
-        return self.results["x_right"]
-
-    def get_x_max(self):
-        return self.results["x_max"]
+        return self.results["left"][0]
 
     def get_y_left(self):
-        return self.results["y_left"]
+        return self.results["left"][1]
+
+    def get_x_extremum(self):
+        return self.results["extremum"][0]
+
+    def get_y_extremum(self):
+        return self.results["extremum"][1]
+
+    def get_x_right(self):
+        return self.results["right"][0]
 
     def get_y_right(self):
-        return self.results["y_right"]
+        return self.results["right"][1]
 
-    def get_y_max(self):
-        return self.results["y_max"]
 
+    def get_target_x(self):
+        """ This function returns the value of the target x value to find the local extremum """
+
+        return float(self.target_x)
 
     def get_depth(self):
-        """ This function returns the value of the algorithm depth to find the local maximum """
+        """ This function returns the value of the algorithm depth to find the local extremum """
 
         return int(self.depth)
 
     def set_depth(self,value):
-        """ This function set the value of the algorithm depth to find the local maximum """
+        """ This function set the value of the algorithm depth to find the local extremum """
 
         self.depth = int(value)
+        self.analyzer.refresh(self.analyzer.data)
 
     def get_level(self):
         """ This function returns the value of the drop in dB for the bandwitdh """
@@ -460,6 +493,7 @@ class BandwidthModule:
         """ This function set the value of the drop in dB for the bandwitdh """
 
         self.level = float(value)
+        self.analyzer.refresh(self.analyzer.data)
 
 
     def get_comparator(self):
@@ -472,9 +506,13 @@ class BandwidthModule:
 
         self.comparator = bool(int(float(value)))
         self._comparator = np.greater if self.comparator is True else np.less
+        self.analyzer.refresh(self.analyzer.data)
 
 
-    def search_bandwitdh(self, x_max="default", depth="default", level="default", comparator="default"):
+    def search_bandwitdh(self, target_x=-1, level="default", comparator="default", depth="default"):
+        """ This function compute the bandwidth around target_x and return the x,y coordinate of the left, center and right"""
+
+        self.target_x = target_x
 
         if depth == "default":
             depth = self.depth
@@ -485,21 +523,26 @@ class BandwidthModule:
         if comparator == "default":
             comparator = self._comparator
 
+        data = self.analyzer.data
+        variable_x = self.analyzer.x_label
+        variable_y = self.analyzer.y_label
+
+        assert len(data) != 0, "Empty dataframe"
+
         try:
-            dataset = self.data._data
-            data = dataset[self.data._last_data_name]
+            if variable_x == variable_y:
+                x_data = np.array(data.values[:,0])
+                y_data = x_data
+            else:
+                x_data, y_data = np.array(data[variable_x]), np.array(data[variable_y])
 
-            variable_x = self.data._x_label
-            variable_y = self.data._y_label
-
-            x_data, y_data = np.array(data[variable_x]), np.array(data[variable_y])
-
-            self.results = sweep_analyse(x_data, y_data,
-                x_max=x_max, depth=depth, level=level, remove_zero=self._remove_zero, comparator=comparator)
+            self.results = sweep_analyse(x_data, y_data, target_x=target_x, level=level, comparator=comparator, depth=depth, remove_zero=self._remove_zero)
 
         except Exception as error:
             print("Couldn't find the bandwitdh:", error)
             self.results = self.init_variables()
+
+        self.analyzer.refresh_gui()
 
         return self.results
 
@@ -508,50 +551,47 @@ class BandwidthModule:
 
         config = []
 
-        config.append({'element':'action','name':'search_bandwitdh_global',
-                       'do':self.search_bandwitdh,
-                       'help':'Find the bandwitdh around the global maximum peak'})
-
-        config.append({'element':'action','name':'search_bandwitdh_local',
+        config.append({'element':'action','name':'search_bandwitdh',
                         'do':self.search_bandwitdh,
                         "param_type":float,
-                        'help':'Find the bandwitdh around the local peak closed to the defined wavelength'})
+                        'help':'Find the bandwitdh around the local peak closed to the defined x value. Set -1 for global extremum'})
 
         config.append({'element':'variable','name':'x_left',
                        'read':self.get_x_left,
                        'type':float,
                        'help':'Return x_left value'})
 
-        config.append({'element':'variable','name':'x_right',
-                       'read':self.get_x_right,
-                       'type':float,
-                       'help':'Return x_right value'})
-
-        config.append({'element':'variable','name':'x_max',
-                       'read':self.get_x_max,
-                       'type':float,
-                       'help':'Return x_max value'})
-
         config.append({'element':'variable','name':'y_left',
                        'read':self.get_y_left,
                        'type':float,
                        'help':'Return y_left value'})
+
+        config.append({'element':'variable','name':'x_extremum',
+                       'read':self.get_x_extremum,
+                       'type':float,
+                       'help':'Return x_max value'})
+
+        config.append({'element':'variable','name':'y_extremum',
+                       'read':self.get_y_extremum,
+                       'type':float,
+                       'help':'Return y_max value'})
+
+        config.append({'element':'variable','name':'x_right',
+                       'read':self.get_x_right,
+                       'type':float,
+                       'help':'Return x_right value'})
 
         config.append({'element':'variable','name':'y_right',
                        'read':self.get_y_right,
                        'type':float,
                        'help':'Return y_right value'})
 
-        config.append({'element':'variable','name':'y_max',
-                       'read':self.get_y_max,
-                       'type':float,
-                       'help':'Return y_max value'})
 
         config.append({'element':'variable','name':'depth',
                        'read':self.get_depth,
                        'write':self.set_depth,
                        'type':int,
-                       'help':'Set algorithm depth to find the local maximum'})
+                       'help':'Set algorithm depth to find the local extremum'})
 
         config.append({'element':'variable','name':'comparator',
                        'read':self.get_comparator,
@@ -568,221 +608,198 @@ class BandwidthModule:
         return config
 
 
-def sweep_analyse(x_data, y_data, x_max="default", depth=1, level=-3, remove_zero=True, comparator=np.greater):
-    """ x_max : x value close to the desired maximum y """
+def sweep_analyse(x_data, y_data, target_x=-1, level=-3, comparator=np.greater, depth=1, remove_zero=False):
+    """ target_x : x value close to the desired local extremum y. If -1, consider default and choose global extremum y"""
     # OPTIMIZE: put back this line -> data = data.dropna()  # BUG: crash python if ct400 dll loaded
-    # x_data, y_data = np.array(data[variable_x]), np.array(data[variable_y])
-    if remove_zero:
-        keep_data = y_data != 0  # used to remove unwanted data if loading interpolated sweep
-        y_data = y_data[keep_data]
-        x_data = x_data[keep_data]
+    if comparator is True:
+       comparator = np.greater
+    elif comparator is False:
+       comparator = np.less
 
-    if x_max != "default":
+    x_data, y_data = np.array(x_data), np.array(y_data)
+
+    if np.all(x_data[:-1] >= x_data[1:]):  # change decreasing order to increasing
+        x_data = x_data[::-1]
+        y_data = y_data[::-1]
+
+    assert np.all(x_data[:-1] <= x_data[1:]), "x axis is not sorted"
+
+    if remove_zero:
+        if y_data.any():  # don't remove if have only 0
+            keep_data = y_data != 0
+            y_data = y_data[keep_data]
+            x_data = x_data[keep_data]
+
+    if target_x != -1:
 
         order = lambda x: (((x-1) % 3)**2 + 1)*10**abs((x-1)//3)
         order_array = order(np.arange(1, depth+1))
         # order_array = np.array([1, 2, 5, 10, 20, 50, 100, 200])  # result if depth=6
         data = list()
 
-        for order in order_array:  # search local maximum with different filter setting
-            maximum_filter = find_local_maximum(x_data, y_data, x_max, order=order, level=level, comparator=comparator)
-            point = {"x": maximum_filter.x, "y": maximum_filter.y}
+        for order in order_array:  # search local extremum with different filter setting
+            extremum_filter = find_local_extremum(x_data, y_data, target_x, level, order, comparator=comparator)
+            point = {"x": extremum_filter[0], "y": extremum_filter[1]}
             data.append(point)
 
         df = pd.DataFrame(data)
 
         x_candidates = df['x'].mode().values  # wavelength with the most occurences (could have several wavelength with same occurance)
 
-        condition = np.abs(x_candidates - x_max)  # take wavelength closer to target if several x points found
-        index = np.where(condition == np.min(condition))[0][0]
+        index = abs(x_candidates - target_x).argmin()  # take wavelength closer to target_x if several x points found
+        extremum_x = x_candidates[index]
 
-        maximum = Data()
-        maximum.x = x_candidates[index]
-
-        index2 = np.where(x_data == maximum.x)[0][0]
-        maximum.y = y_data[index2]
+        index2 = np.where(x_data == extremum_x)[0][0]
+        extremum = (extremum_x, y_data[index2])
 
     else:
-        # get maximum y_data and change it only if user want a different x_max
-        maximum = Data()
+        # get extremum y_data and change it only if user want a different x_max
         if comparator is np.greater:
-            maximum.y = np.max(y_data)
-            maximum.index = np.argmax(y_data)
+            extremum_index = np.argmax(y_data)
         elif comparator is np.less:
-            maximum.y = np.min(y_data)
-            maximum.index = np.argmin(y_data)
-        maximum.x = x_data[maximum.index]
+            extremum_index = np.argmin(y_data)
+        else:
+            raise TypeError(f"Comparator must be of type np.greater or np.less or bool. Given {comparator} of type {type(comparator)}")
+
+        extremum = (x_data[extremum_index], y_data[extremum_index])
 
     # df.hist()  # used to see the selection process
-    quadrature_left, quadrature_right = find_3db(x_data, y_data, maximum, level=level, interp=True, comparator=comparator)
+    bandwidth_left, bandwidth_right = find_bandwidth(x_data, y_data, level, extremum, interp=True, comparator=comparator)
 
-    results = {"x_left": quadrature_left.x, "y_left": quadrature_left.y,
-               "x_right": quadrature_right.x, "y_right": quadrature_right.y,
-               "x_max": maximum.x, "y_max": maximum.y}
+    results = {"left": bandwidth_left, "extremum": extremum, "right": bandwidth_right}
 
     return results
 
 
-def find_local_maximum(x_data, y_data, x_max, order=10, level=-3, comparator=np.greater):
+def find_local_extremum(x_data, y_data, target_x, level, order, comparator=np.greater):
 
-    """ Find local maximum with wl close to x_max.
-        order is used to filter local maximum. """
+    """ Find local extremum with closest x value to target_x.
+        order is used to filter local extremums. """
 
     from scipy.signal import argrelextrema
 
-    maximum_array = Data()
-    maximum_array.index = argrelextrema(y_data, comparator, order=order)[0]
+    extremum_array_index = argrelextrema(y_data, comparator, order=order)[0]
 
     if len(y_data) > 1:
         if y_data[-1] > y_data[-2]:
-            maximum_array.index = np.append(maximum_array.index, len(y_data)-1)
+            extremum_array_index = np.append(extremum_array_index, len(y_data)-1)
 
         if y_data[0] > y_data[1]:
-            maximum_array.index = np.insert(maximum_array.index, 0, 0)
+            extremum_array_index = np.insert(extremum_array_index, 0, 0)
 
-    if maximum_array.index.shape[0] != 0:
+    if extremum_array_index.shape[0] != 0:
+        extremum_array_x = x_data[extremum_array_index]
+        extremum_array_y = y_data[extremum_array_index]
 
-        maximum_array.x = x_data[maximum_array.index]
-        maximum_array.y = y_data[maximum_array.index]
-
-        condition = np.abs(maximum_array.x - x_max)
-
-        index = np.where(condition == np.min(condition))[0][0]
-
-        maximum_filter = Data()
-        maximum_filter.index = index
-        maximum_filter.x = maximum_array.x[index]  # maximum wavelength from filter maximum list
-        maximum_filter.y = maximum_array.y[index]
-
-        maximum = find_maximum_from_maximum_filter(x_data, y_data, maximum_filter, level=level, comparator=comparator)
+        index = abs(extremum_array_x - target_x).argmin()
+        extremum_filter = (extremum_array_x[index], extremum_array_y[index])  # data from filter extremum list
+        extremum = find_extremum_from_extremum_filter(x_data, y_data, level, extremum_filter, interp=False, comparator=comparator)
     else:
-        maximum_raw = Data()
-        maximum_raw.y = np.max(y_data)
-        maximum_raw.index = np.argmax(y_data)
-        maximum_raw.x = x_data[maximum_raw.index]
-        maximum = maximum_raw
+        extremum_raw_index = np.argmax(y_data)
+        extremum_raw = (x_data[extremum_raw_index], y_data[extremum_raw_index])
+        extremum = extremum_raw
 
-    return maximum
+    return extremum
 
 
-def find_maximum_from_maximum_filter(x_data, y_data, maximum_filter, level=-3, comparator=np.greater):
+def find_extremum_from_extremum_filter(x_data, y_data, level, extremum_filter, interp, comparator=np.greater):
 
-    quadrature_filter_left, quadrature_filter_right = find_3db(x_data, y_data, maximum_filter, level=level, comparator=comparator)
+    bandwidth_left_filter, bandwidth_right_filter = find_bandwidth(x_data, y_data, level, extremum_filter, interp, comparator=comparator)
 
-    interval_low_index = np.where(x_data <= quadrature_filter_left.x)[0][-1]
-    interval_high_index = np.where(x_data >= quadrature_filter_right.x)[0][0]
+    interval_low_index = np.where(x_data <= bandwidth_left_filter[0])[0][-1]
+    interval_high_index = np.where(x_data >= bandwidth_right_filter[0])[0][0]
 
     if interval_high_index == 0:
-        interval_high_index = None  # To avoid removing all the data
+        new_interval_x = x_data[interval_low_index: None]
+        new_interval_y = y_data[interval_low_index: None]
+    else:
+        new_interval_x = x_data[interval_low_index: interval_high_index+1]
+        new_interval_y = y_data[interval_low_index: interval_high_index+1]
 
-    new_interval = Data()
-    new_interval.x = x_data[interval_low_index: interval_high_index+1]
-    new_interval.y = y_data[interval_low_index: interval_high_index+1]
-
-    maximum = Data()
     if comparator is np.greater:
-        maximum.index = np.argmax(new_interval.y)
+        extremum_index = np.argmax(new_interval_y)
     elif comparator is np.less:
-        maximum.index = np.argmin(new_interval.y)
-    maximum.x = new_interval.x[maximum.index]
-    maximum.y = new_interval.y[maximum.index]
+        extremum_index = np.argmin(new_interval_y)
 
-    return maximum
+    extremum = (new_interval_x[extremum_index], new_interval_y[extremum_index])
+
+    return extremum
 
 
-def find_3db(x_data, y_data, maximum, interp=False, level=-3, comparator=np.greater):
-    condition = np.abs(x_data - maximum.x)
-    index = np.argmin(condition)
+def find_bandwidth(x_data, y_data, level, extremum, interp, comparator=np.greater):
+    """ Find the bandwidth """
+    x_data, y_data = np.array(x_data), np.array(y_data)
 
-    x_left = x_data[:index+1][::-1]  # Reverse order to start at maximum
-    x_right = x_data[index:]
+    if len(x_data) == 0:
+        bandwidth_left = (None, None)
+        return bandwidth_left, bandwidth_left
+    elif len(x_data) == 1:
+        bandwidth_left = (x_data[0], y_data[0])
+        return bandwidth_left, bandwidth_left
 
-    y_left = y_data[:index+1][::-1]
-    y_right = y_data[index:]
+    index_extremum = abs(x_data - extremum[0]).argmin()
 
-    quadrature_target = Data()
-    quadrature_target.y = maximum.y + level
+    x_left = x_data[:index_extremum+1][::-1]  # Reverse order to start at extremum
+    y_left= y_data[:index_extremum+1][::-1]
 
-    # left 3db
-    if level <= 0:
-        index = np.where(y_left <= quadrature_target.y)[0]
+    x_right = x_data[index_extremum:]
+    y_right = y_data[index_extremum:]
+
+    target_y = extremum[1] + level
+
+    bandwidth_left = find_bandwidth_side(x_left, y_left, target_y, level, extremum, interp)
+    bandwidth_right = find_bandwidth_side(x_right, y_right, target_y, level, extremum, interp)
+
+    return bandwidth_left, bandwidth_right
+
+
+def find_bandwidth_side(x_side, y_side, target_y, level, extremum, interp):
+    """ Find (x,y) coordinate of bandwith for the given side """
+    if len(x_side) == 1:
+        bandwidth_side = (x_side[0], y_side[0])
     else:
-        index = np.where(y_left >= quadrature_target.y)[0]
+        if level == 0:
+            bandwidth_side = extremum
+        else:
+            if level < 0:
+                index_side_list1 = np.where(y_side <= target_y)[0]
+            else:
+                index_side_list1 = np.where(y_side >= target_y)[0]
 
-    quadrature_target.index = -1 if index.shape[0] == 0 else index[0]
+            if index_side_list1.shape[0] == 0:
+                bandwidth_side = (x_side[-1], y_side[-1])
+            else:
+                index_side1 = index_side_list1[0]
+                x_side_cut1 = x_side[:index_side1+1][::-1]
+                y_side_cut1 = y_side[:index_side1+1][::-1]
 
-    if len(x_left) != 0:
-        quadrature_target.x = x_left[quadrature_target.index]
+                if level < 0:
+                    index_side_list2 = np.where(y_side_cut1 > target_y)[0]
+                else:
+                    index_side_list2 = np.where(y_side_cut1 < target_y)[0]
 
-        condition = np.abs(x_data - quadrature_target.x)
-        index = np.where(condition == np.min(condition))[0][0]
+                if index_side_list2.shape[0] == 0 or len(x_side_cut1) == 1:
+                    bandwidth_side = (x_side_cut1[0], y_side_cut1[0])
+                else:
+                    index_side2 = index_side_list2[0]
+                    x_side_cut2 = x_side_cut1[:index_side2+1]
+                    y_side_cut2 = y_side_cut1[:index_side2+1]
 
-        quadrature_left = interp_3db(x_data, y_data, index, quadrature_target.y, "left", interp=interp, comparator=comparator)
-    else:
-        quadrature_left = Data()
-        try:
-            quadrature_left.x = x_data[0]
-            quadrature_left.y = y_data[0]
-        except:
-            quadrature_left.x = None
-            quadrature_left.y = None
+                    if interp:
+                        bandwidth_side = interp_lin(x_side_cut2, y_side_cut2, target_y)
+                    else:
+                        bandwidth_side = (x_side_cut2[0], y_side_cut2[0])
 
-    # right 3db
-    if level <= 0:
-        index = np.where(y_right <= quadrature_target.y)[0]
-    else:
-        index = np.where(y_right >= quadrature_target.y)[0]
-
-    quadrature_target.index = -1 if index.shape[0] == 0 else index[0]
-
-    if len(x_right) != 0:
-        quadrature_target.x = x_right[quadrature_target.index]
-
-        condition = np.abs(x_data - quadrature_target.x)
-        index = np.where(condition == np.min(condition))[0][0]
-
-        quadrature_right = interp_3db(x_data, y_data, index, quadrature_target.y, "right", interp=interp, comparator=comparator)
-    else:
-        quadrature_right = Data()
-        try:
-            quadrature_left.x = x_data[-1]
-            quadrature_left.y = y_data[-1]
-        except:
-            quadrature_right.x = None
-            quadrature_right.y = None
+    return bandwidth_side
 
 
-    return quadrature_left, quadrature_right
+def interp_lin(x_data, y_data, target_y):
+    """ Interpolate between two points """
+    assert len(x_data) == 2 and len(y_data) == 2, (f"Two points were expected for interpolation, {len(x_data)} were given")
 
+    a = (y_data[-1] - y_data[0]) / (x_data[-1] - x_data[0])
+    b = y_data[0] - a*x_data[0]
+    y = target_y
+    x = (y - b) / a
 
-def interp_3db(x_data, y_data, index, target, direction, interp=False, comparator=np.greater):
-
-    x1 = x_data[index]
-    y1 = y_data[index]
-
-    if interp and ((y1 <= target and comparator is np.greater) or (y1 >= target and comparator is np.less)):
-
-        assert direction in ("left", "right")
-
-        if direction == "right":
-            next_index = index-1
-        elif direction == "left":
-            next_index = index+1
-
-
-        x2 = x_data[next_index]
-        y2 = y_data[next_index]
-
-        a = (y2 - y1) / (x2 - x1)
-        b = y1 - a*x1
-        y = target
-        x = (y - b) / a
-    else:
-        x = x1
-        y = y1
-
-    quadrature = Data()
-    quadrature.x = x
-    quadrature.y = y
-
-    return quadrature
+    return (x, y)

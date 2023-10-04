@@ -47,7 +47,8 @@ class MyQTreeWidget(QtWidgets.QTreeWidget):
 
     def dragEnterEvent(self, event):
 
-        if (event.source() is self) or (hasattr(event.source(), "last_drag") and hasattr(event.source().last_drag, "_element_type")):
+        if (event.source() is self) or (
+                hasattr(event.source(), "last_drag") and hasattr(event.source().last_drag, "_element_type") and event.source().last_drag._element_type != "module"):
             event.accept()
         else:
             event.ignore()
