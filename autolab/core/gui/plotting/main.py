@@ -9,7 +9,6 @@ import os
 
 from .figure import FigureManager
 from .data import DataManager
-from .analyze import AnalyzeManager
 from .thread import ThreadManager
 from .treewidgets import TreeWidgetItemModule
 
@@ -64,7 +63,6 @@ class Plotter(QtWidgets.QMainWindow):
         # Loading of the different centers
         self.figureManager = FigureManager(self)
         self.dataManager = DataManager(self)
-        self.analyzeManager = AnalyzeManager()
 
         self.threadManager = ThreadManager(self)
         # Save button
