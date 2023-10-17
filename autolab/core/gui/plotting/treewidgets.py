@@ -41,6 +41,7 @@ class TreeWidgetItemModule(QtWidgets.QTreeWidgetItem):
         for subModuleName in subModuleNames :
             subModule = getattr(self.module,subModuleName)
             item = TreeWidgetItemModule(self, subModuleName,None,self.gui)
+            item = TreeWidgetItemModule(self, subModuleName,subModuleName,self.gui)
             item.load(subModule)
 
         # Variables

@@ -113,7 +113,7 @@ class AnalyzeManager :
         return bool(self.isDisplayCursor)
 
     def set_displayCursor(self, value):
-        value =  bool(int(float(value)))
+        value = bool(int(float(value)))
         self.isDisplayCursor = value
         self.refresh(self.data)
 
@@ -152,7 +152,7 @@ class AnalyzeManager :
     def set_data(self, value):
         """  Open data from DataFrame """
 
-        df = pd.DataFrame(value)
+        df = formatData(value)
         self._open(df)
 
 
@@ -265,6 +265,11 @@ class AnalyzeManager :
                            'read':self.get_data,
                            "help": "Return data stored at data_name"})
 
+            config.append({'element':'action','name':'set_data',
+                            'do':self.set_data,
+                            'param_type':pd.DataFrame,
+                            'help':'Add DataFrame to dict using data_name as key'})
+
         config.append({'element':'module','name':'min','object':getattr(self,'min')})
         config.append({'element':'module','name':'max','object':getattr(self,'max')})
         config.append({'element':'module','name':'mean','object':getattr(self,'mean')})
@@ -309,10 +314,6 @@ class DataModule:
                        'type':str,
                        'help':'Set y_label to consider in analyze functions'})
 
-        config.append({'element':'action','name':'set_data',
-                        'do':self.analyzer.set_data,
-                        'param_type':pd.DataFrame,
-                        'help':'Add DataFrame to dict using data_name as key'})
 
         return config
 

@@ -436,7 +436,7 @@ class Laser:
         self._speed = self.config["speed"][self.NUM-1]
         self._state = False
         self._power = 1.
-        self._wavelength = 1550.
+        self._wavelength = (self._low_wavelength+self._high_wavelength)/2
 
     def _init_laser(self):
         if self.model == "CT440":
