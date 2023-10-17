@@ -58,6 +58,8 @@ class ControlCenter(QtWidgets.QMainWindow):
         self.monitors = {}
         self.sliders = {}
         self.customGUIdict = {}
+        self.threadModuleDict = {}
+        self.threadItemDict = {}
 
         scanAction = self.menuBar.addAction('Open scanner')
         scanAction.triggered.connect(self.openScanner)
@@ -94,6 +96,28 @@ class ControlCenter(QtWidgets.QMainWindow):
         helpAction.triggered.connect(lambda : web.doc('default'))
         helpAction.setStatusTip('Open the documentation on Read The Docs website')
 
+        timer = QtCore.QTimer(self)
+        timer.setInterval(50) # ms
+        timer.timeout.connect(self.timerAction)
+        timer.start()
+
+    def timerAction(self):
+
+        """ This function checks if a module has been loaded and put to the queue. If so, associate item and module """
+
+        threadItemDictTemp = self.threadItemDict.copy()
+        threadModuleDictTemp = self.threadModuleDict.copy()
+
+        for item_id in threadModuleDictTemp.keys():
+
+            item = threadItemDictTemp[item_id]
+            module = threadModuleDictTemp[item_id]
+
+            self.associate(item, module)
+            item.setExpanded(True)
+
+            self.threadItemDict.pop(item_id)
+            self.threadModuleDict.pop(item_id)
 
     def initialize(self):
 
@@ -105,7 +129,7 @@ class ControlCenter(QtWidgets.QMainWindow):
             for i in range(5) :
                 item.setBackground(i, QtGui.QColor('#9EB7F5'))  # blue
             if devName in devices.list_loaded_devices() :
-                self.associate(item)
+                self.itemClicked(item)
 
 
 
@@ -143,9 +167,9 @@ class ControlCenter(QtWidgets.QMainWindow):
         """ Function called when a normal click has been detected in the tree.
             Check the association if it is a main item """
 
-        if item.parent() is None and item.loaded is False :
-            self.associate(item)
-            item.setExpanded(True)
+        if item.parent() is None and item.loaded is False and id(item) not in self.threadItemDict.keys():
+            self.threadManager.start(item,'load')  # load device and add it to queue for timer to associate it later (doesn't block gui while device is openning)
+
 
     def itemPressed(self,item):
 
@@ -165,40 +189,28 @@ class ControlCenter(QtWidgets.QMainWindow):
             self.tree.last_drag = None
 
 
-    def associate(self,item):
+    def associate(self,item, module):
 
         """ Function called to associate a main module to one item in the tree """
 
-        # Try to get / instantiated the device
-        check = False
-        try :
-            self.setStatus(f'Loading device {item.name}...', 5000)
-            module = devices.get_device(item.name)
+        # If the driver has an openGUI method, a button will be added to the Autolab menu to access it.
+        if hasattr(module.instance, "openGUI"):
+            if hasattr(module.instance, "gui_name"):
+                gui_name = str(module.instance.gui_name)
+            else:
+                gui_name = 'Custom GUI'
 
-            # If the driver has an openGUI method, a button will be added to the Autolab menu to access it.
-            if hasattr(module.instance, "openGUI"):
-                if hasattr(module.instance, "gui_name"):
-                    gui_name = str(module.instance.gui_name)
-                else:
-                    gui_name = 'Custom GUI'
+            customButton = self.customGUIdict.get(gui_name, None)
 
-                customButton = self.customGUIdict.get(gui_name, None)
+            if customButton is None:
+                customButton = self.menuBar.addAction(gui_name)
+                self.customGUIdict[gui_name] = customButton
 
-                if customButton is None:
-                    customButton = self.menuBar.addAction(gui_name)
-                    self.customGUIdict[gui_name] = customButton
+            customButton.triggered.disconnect()
+            customButton.triggered.connect(module.instance.openGUI)
 
-                customButton.triggered.disconnect()
-                customButton.triggered.connect(module.instance.openGUI)
-
-            check = True
-            self.clearStatus()
-        except Exception as e :
-            self.setStatus(f'An error occured when loading device {item.name} : {str(e)}', 10000)
-
-        # If success, load the entire module (submodules, variables, actions)
-        if check is True :
-            item.load(module)
+        # load the entire module (submodules, variables, actions)
+        item.load(module)
 
 
     def openScanner(self):

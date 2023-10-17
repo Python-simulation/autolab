@@ -6,6 +6,8 @@ Created on Sun Sep 29 18:26:32 2019
 """
 
 from PyQt5 import QtCore
+from ... import devices
+import sip
 
 
 class ThreadManager :
@@ -45,6 +47,7 @@ class ThreadManager :
         if intType == 'read' : status = f'Reading {item.variable.address()}...'
         elif intType == 'write' : status = f'Writing {item.variable.address()}...'
         elif intType == 'execute' : status = f'Executing {item.action.address()}...'
+        elif intType == 'load' : status = f'Loading device {item.name}...'
         self.gui.setStatus(status)
 
         # Thread configuration
@@ -71,11 +74,14 @@ class ThreadManager :
         item.setDisabled(False)
 
         if hasattr(item, "execButton"):
-            item.execButton.setEnabled(True)
+            if not sip.isdeleted(item.execButton):
+                item.execButton.setEnabled(True)
         if hasattr(item, "readButton"):
-            item.readButton.setEnabled(True)
+            if not sip.isdeleted(item.readButton):
+                item.readButton.setEnabled(True)
         if hasattr(item, "valueWidget"):
-            item.valueWidget.setEnabled(True)
+            if not sip.isdeleted(item.valueWidget):
+                item.valueWidget.setEnabled(True)
 
 
     def delete(self,tid):
@@ -122,7 +128,15 @@ class InteractionThread(QtCore.QThread):
                     self.item.action(self.value)
                 else :
                     self.item.action()
+            elif self.intType == 'load' :
+                self.item.gui.threadItemDict[id(self.item)] = self.item  # needed before get_device so gui can know an item has been clicked to block multiple clicks
+                module = devices.get_device(self.item.name)  # Try to get / instantiated the device
+                self.item.gui.threadModuleDict[id(self.item)] = module
 
         except Exception as e:
             error = e
+            if self.intType == 'load' :
+                error = f'An error occured when loading device {self.item.name} : {str(e)}'
+                if id(self.item) in self.item.gui.threadItemDict.keys():
+                    self.item.gui.threadItemDict.pop(id(self.item))
         self.endSignal.emit(error)

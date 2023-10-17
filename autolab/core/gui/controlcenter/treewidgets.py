@@ -14,6 +14,7 @@ from ...devices import close, DEVICES
 from ... import paths, config
 import pandas as pd
 import numpy as np
+import sip
 
 
 class TreeWidgetItemModule(QtWidgets.QTreeWidgetItem):
@@ -291,18 +292,18 @@ class TreeWidgetItemVariable(QtWidgets.QTreeWidgetItem):
     def writeGui(self,value):
 
         """ This function displays a new value in the GUI """
+        if not sip.isdeleted(self.valueWidget):  # avoid crash if device closed and try to write gui (if close device before reading finished)
+            # Update value
+            if self.variable.numerical :
+                self.valueWidget.setText(f'{value:.{self.precision}g}') # default is .6g
+            elif self.variable.type in [str] :
+                self.valueWidget.setText(value)
+            elif self.variable.type in [bool] :
+                self.valueWidget.setChecked(value)
 
-        # Update value
-        if self.variable.numerical :
-            self.valueWidget.setText(f'{value:.{self.precision}g}') # default is .6g
-        elif self.variable.type in [str] :
-            self.valueWidget.setText(value)
-        elif self.variable.type in [bool] :
-            self.valueWidget.setChecked(value)
-
-        # Change indicator light to green
-        if self.variable.type in [int,float,bool,str,np.ndarray,pd.DataFrame] :
-            self.setValueKnownState(True)
+            # Change indicator light to green
+            if self.variable.type in [int,float,bool,str,np.ndarray,pd.DataFrame] :
+                self.setValueKnownState(True)
 
 
 

@@ -13,7 +13,6 @@ from .thread import ThreadManager
 from .treewidgets import TreeWidgetItemModule
 
 from ... import devices
-from ... import drivers
 from ... import config
 
 
@@ -70,6 +69,9 @@ class Plotter(QtWidgets.QMainWindow):
         self.dataManager = DataManager(self)
 
         self.threadManager = ThreadManager(self)
+        self.threadModuleDict = {}
+        self.threadItemDict = {}
+
         # Save button
         self.save_pushButton.clicked.connect(self.dataManager.saveButtonClicked)
         self.save_pushButton.setEnabled(False)
@@ -125,14 +127,36 @@ class Plotter(QtWidgets.QMainWindow):
 
         self.processPlugin()
 
+        timerPlugin = QtCore.QTimer(self)
+        timerPlugin.setInterval(50) # ms
+        timerPlugin.timeout.connect(self.timerAction)
+        timerPlugin.start()
+
+    def timerAction(self):
+
+        """ This function checks if a module has been loaded and put to the queue. If so, associate item and module """
+
+        threadItemDictTemp = self.threadItemDict.copy()
+        threadModuleDictTemp = self.threadModuleDict.copy()
+
+        for item_id in threadModuleDictTemp.keys():
+
+            item = threadItemDictTemp[item_id]
+            module = threadModuleDictTemp[item_id]
+
+            self.associate(item, module)
+            item.setExpanded(True)
+
+            self.threadItemDict.pop(item_id)
+            self.threadModuleDict.pop(item_id)
+
     def itemClicked(self,item):
 
         """ Function called when a normal click has been detected in the tree.
             Check the association if it is a main item """
 
-        if item.parent() is None and item.loaded is False :
-            self.associate(item)
-            item.setExpanded(True)
+        if item.parent() is None and item.loaded is False and id(item) not in self.threadItemDict.keys():
+            self.threadManager.start(item,'load')  # load device and add it to queue for timer to associate it later (doesn't block gui while device is openning)
 
     def rightClick(self,position):
 
@@ -194,28 +218,14 @@ class Plotter(QtWidgets.QMainWindow):
             plugin_nickname = self.getUniqueName(plugin_nickname)
             item = TreeWidgetItemModule(self.tree,plugin_name,plugin_nickname,self)
             item.setBackground(0, QtGui.QColor('#9EB7F5'))  # blue
-            item.setExpanded(True)
 
-            self.associate(item)
+            self.itemClicked(item)
         else:
             self.statusBar.showMessage(f"Error: plugin {plugin_name} not found in devices_config.ini",5000)
 
-    def associate(self, item):
-        plugin_name = item.name
+    def associate(self, item, module):
+
         plugin_nickname = item.nickname
-        device_config = devices.get_final_device_config(plugin_name)
-
-        try:
-            instance = drivers.get_driver(device_config['driver'],
-                                           device_config['connection'],
-                                           **{ k:v for k,v in device_config.items() if k not in ['driver','connection']},
-                                           gui=self)
-        except Exception:
-            instance = drivers.get_driver(device_config['driver'],
-                                           device_config['connection'],
-                                           **{ k:v for k,v in device_config.items() if k not in ['driver','connection']})
-        module = devices.Device(plugin_name,instance)
-
         item.load(module)
         self.active_plugin_dict[plugin_nickname] = module
         self.all_plugin_dict[plugin_nickname] = module
