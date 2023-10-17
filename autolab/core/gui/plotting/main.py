@@ -55,7 +55,7 @@ class Plotter(QtWidgets.QMainWindow):
 
         self.active = False
         self.mainGui = mainGui
-        self.all_plugin_dict = dict()
+        self.all_plugin_list = list()
         self.active_plugin_dict = dict()
 
         # Configuration of the window
@@ -125,12 +125,12 @@ class Plotter(QtWidgets.QMainWindow):
 
         self.setAcceptDrops(True)
 
+        self.timerPlugin = QtCore.QTimer(self)
+        self.timerPlugin.setInterval(50) # ms
+        self.timerPlugin.timeout.connect(self.timerAction)
+
         self.processPlugin()
 
-        timerPlugin = QtCore.QTimer(self)
-        timerPlugin.setInterval(50) # ms
-        timerPlugin.timeout.connect(self.timerAction)
-        timerPlugin.start()
 
     def timerAction(self):
 
@@ -150,6 +150,9 @@ class Plotter(QtWidgets.QMainWindow):
             self.threadItemDict.pop(item_id)
             self.threadModuleDict.pop(item_id)
 
+        if len(threadItemDictTemp) == 0:
+            self.timerPlugin.stop()
+
     def itemClicked(self,item):
 
         """ Function called when a normal click has been detected in the tree.
@@ -157,6 +160,7 @@ class Plotter(QtWidgets.QMainWindow):
 
         if item.parent() is None and item.loaded is False and id(item) not in self.threadItemDict.keys():
             self.threadManager.start(item,'load')  # load device and add it to queue for timer to associate it later (doesn't block gui while device is openning)
+            self.timerPlugin.start()
 
     def rightClick(self,position):
 
@@ -216,6 +220,7 @@ class Plotter(QtWidgets.QMainWindow):
 
         if plugin_name in devices.list_devices():
             plugin_nickname = self.getUniqueName(plugin_nickname)
+            self.all_plugin_list.append(plugin_nickname)
             item = TreeWidgetItemModule(self.tree,plugin_name,plugin_nickname,self)
             item.setBackground(0, QtGui.QColor('#9EB7F5'))  # blue
 
@@ -225,10 +230,8 @@ class Plotter(QtWidgets.QMainWindow):
 
     def associate(self, item, module):
 
-        plugin_nickname = item.nickname
         item.load(module)
-        self.active_plugin_dict[plugin_nickname] = module
-        self.all_plugin_dict[plugin_nickname] = module
+        self.active_plugin_dict[item.nickname] = module
 
         try:
             data = self.dataManager.getLastSelectedDataset().data
@@ -239,7 +242,7 @@ class Plotter(QtWidgets.QMainWindow):
 
     def getUniqueName(self,basename):
         """ This function adds a number next to basename in case this basename is already taken """
-        names = self.all_plugin_dict.keys()
+        names = self.all_plugin_list
         name = basename
 
         compt = 0

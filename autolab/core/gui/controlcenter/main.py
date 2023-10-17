@@ -96,10 +96,9 @@ class ControlCenter(QtWidgets.QMainWindow):
         helpAction.triggered.connect(lambda : web.doc('default'))
         helpAction.setStatusTip('Open the documentation on Read The Docs website')
 
-        timer = QtCore.QTimer(self)
-        timer.setInterval(50) # ms
-        timer.timeout.connect(self.timerAction)
-        timer.start()
+        self.timerDevice = QtCore.QTimer(self)
+        self.timerDevice.setInterval(50) # ms
+        self.timerDevice.timeout.connect(self.timerAction)
 
     def timerAction(self):
 
@@ -118,6 +117,9 @@ class ControlCenter(QtWidgets.QMainWindow):
 
             self.threadItemDict.pop(item_id)
             self.threadModuleDict.pop(item_id)
+
+        if len(threadItemDictTemp) == 0:
+            self.timerDevice.stop()
 
     def initialize(self):
 
@@ -169,7 +171,7 @@ class ControlCenter(QtWidgets.QMainWindow):
 
         if item.parent() is None and item.loaded is False and id(item) not in self.threadItemDict.keys():
             self.threadManager.start(item,'load')  # load device and add it to queue for timer to associate it later (doesn't block gui while device is openning)
-
+            self.timerDevice.start()
 
     def itemPressed(self,item):
 
