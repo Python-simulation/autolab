@@ -34,15 +34,20 @@ class MyQTreeWidget(QtWidgets.QTreeWidget):
         variable = event.source().last_drag
         if type(variable) == str:
             self.plotter.addPlugin(variable)
+        self.setGraphicsEffect(None)
 
     def dragEnterEvent(self, event):
 
         if (event.source() is self) or (
                 hasattr(event.source(), "last_drag") and type(event.source().last_drag) is str):
             event.accept()
+            shadow = QtWidgets.QGraphicsDropShadowEffect(blurRadius=25, xOffset=3, yOffset=3)
+            self.setGraphicsEffect(shadow)
         else:
             event.ignore()
 
+    def dragLeaveEvent(self, event):
+        self.setGraphicsEffect(None)
 
 
 class Plotter(QtWidgets.QMainWindow):
@@ -241,12 +246,29 @@ class Plotter(QtWidgets.QMainWindow):
         filenames = [e.toLocalFile() for e in event.mimeData().urls()]
         self.dataManager.importAction(filenames)
 
+        qwidget_children = self.findChildren(QtWidgets.QWidget)
+        for widget in qwidget_children:
+            widget.setGraphicsEffect(None)
+
     def dragEnterEvent(self, event):
         """ Check that drop filenames """
-        if event.mimeData().hasUrls():
+        # only accept if there is at least one filename in the dropped filenames -> refuse folders
+        if event.mimeData().hasUrls() and any([os.path.isfile(e.toLocalFile()) for e in event.mimeData().urls()]):
             event.accept()
+
+            qwidget_children = self.findChildren(QtWidgets.QWidget)
+            for widget in qwidget_children:
+                shadow = QtWidgets.QGraphicsColorizeEffect()
+                shadow.setColor(QtGui.QColor(20,20,20))
+                shadow.setStrength(1)
+                widget.setGraphicsEffect(shadow)
         else:
             event.ignore()
+
+    def dragLeaveEvent(self, event):
+        qwidget_children = self.findChildren(QtWidgets.QWidget)
+        for widget in qwidget_children:
+            widget.setGraphicsEffect(None)
 
     def plugin_refresh(self):
         if self.active_plugin_dict:

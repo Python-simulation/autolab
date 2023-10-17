@@ -26,6 +26,8 @@ class MyQTreeWidget(QtWidgets.QTreeWidget):
 
         """ This function is used to reorder the recipe or to add a step from a controlcenter drop """
 
+        self.setGraphicsEffect(None)
+
         if event.source() is self:  # if event comes frop recipe -> reorder
             self.setDragDropMode(QtWidgets.QAbstractItemView.InternalMove)  # needed to not create new step but reorder
             QtWidgets.QTreeWidget.dropEvent(self, event)
@@ -50,8 +52,14 @@ class MyQTreeWidget(QtWidgets.QTreeWidget):
         if (event.source() is self) or (
                 hasattr(event.source(), "last_drag") and hasattr(event.source().last_drag, "_element_type") and event.source().last_drag._element_type != "module"):
             event.accept()
+
+            shadow = QtWidgets.QGraphicsDropShadowEffect(blurRadius=25, xOffset=3, yOffset=3)
+            self.setGraphicsEffect(shadow)
         else:
             event.ignore()
+
+    def dragLeaveEvent(self, event):
+        self.setGraphicsEffect(None)
 
     def menu(self, gui, variable, position):
 

@@ -4,7 +4,7 @@ Created on Fri Sep 20 22:08:29 2019
 
 @author: qchat
 """
-from PyQt5 import QtWidgets, uic
+from PyQt5 import QtWidgets, uic, QtGui
 import os
 
 from .config import ConfigManager
@@ -25,7 +25,7 @@ class Scanner(QtWidgets.QMainWindow):
         QtWidgets.QMainWindow.__init__(self)
         ui_path = os.path.join(os.path.dirname(__file__),'interface.ui')
         uic.loadUi(ui_path,self)
-        self.setWindowTitle(f"AUTOLAB Scanner")
+        self.setWindowTitle("AUTOLAB Scanner")
         self.splitter.setSizes([500, 700])  # Set the width of the two main widgets
         # self.splitter_recipe.setSizes([80, 223, 80])  # set the height of the three recipe widgets
 
@@ -59,13 +59,33 @@ class Scanner(QtWidgets.QMainWindow):
             filename = event.mimeData().urls()[0].toLocalFile()
             self.configManager.import_configPars(filename)
 
+        qwidget_children = self.findChildren(QtWidgets.QWidget)
+        for widget in qwidget_children:
+            widget.setGraphicsEffect(None)
+
     def dragEnterEvent(self, event):
         """ Only accept config file (url) and parameter from controlcenter """
-        if event.mimeData().hasUrls() or (
-                hasattr(event.source(), "last_drag") and (hasattr(event.source().last_drag, "parameter_allowed") and event.source().last_drag.parameter_allowed)):
+        if event.mimeData().hasUrls():
             event.accept()
+
+            qwidget_children = self.findChildren(QtWidgets.QWidget)
+            for widget in qwidget_children:
+                shadow = QtWidgets.QGraphicsColorizeEffect()
+                shadow.setColor(QtGui.QColor(20,20,20))
+                shadow.setStrength(1)
+                widget.setGraphicsEffect(shadow)
+        elif (hasattr(event.source(), "last_drag") and (hasattr(event.source().last_drag, "parameter_allowed") and event.source().last_drag.parameter_allowed)):
+            event.accept()
+
+            shadow = QtWidgets.QGraphicsDropShadowEffect(blurRadius=25, xOffset=3, yOffset=3)
+            self.frame_2.setGraphicsEffect(shadow)  # OPTIMIZE: should only accept if drop on frame_2 but can't found how to do it
         else:
             event.ignore()
+
+    def dragLeaveEvent(self, event):
+        qwidget_children = self.findChildren(QtWidgets.QWidget)
+        for widget in qwidget_children:
+            widget.setGraphicsEffect(None)
 
     def closeEvent(self,event):
 
